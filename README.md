@@ -33,7 +33,7 @@ plugins/commspt_bot/              # 父插件（共享层）
 ├── templates/                    # 用户信息卡模板
 ├── assets/                       # 图片与字体
 └── plugins/                      # 13 个子插件（每个功能一个）
-    ├── commspt_simple_response.py    # 静态问答（&help / &faq / &pay ...）
+    ├── commspt_simple_response.py    # 静态问答（&help / &faq / &pay ...）；回复内容见根目录 commspt_simple_response.json
     ├── commspt_profile.py            # &ygg / &pro 玩家查询
     ├── commspt_view_skin.py          # &view / &view.ygg / %view.pro 皮肤渲染
     ├── commspt_profile_check.py      # &check 玩家体检
@@ -66,6 +66,7 @@ cp config.yml.example config.yml
 按需填写：群号（`DEFINED_QQ__*`）、管理员列表（`config.yml` 中的 `admin_list`）、外部 API 地址、
 `LITTLESKIN_ADMIN_TOKEN`、`DB_MONGO__URL` 等。**简单与嵌套配置从 `.env` 读取（`config.py` 的 `Setting` 只定义 schema）；
 结构化列表配置从 `config.yml` 读取（默认位于项目根目录，可用 `COMMSPT_CONFIG_FILE` 覆盖路径）。**
+简易问答（`&help` / `&faq` / `&pay` 等）的回复内容在项目根目录的 `commspt_simple_response.json` 中编辑，可通过 `COMMSPT_SIMPLE_RESPONSE_FILE` 环境变量覆盖路径。
 
 配置项说明：
 
@@ -83,6 +84,7 @@ cp config.yml.example config.yml
 | `API_BROWSERLESS__ENDPOINT` | browserless 截图服务 |
 | `API_SKINRENDERMC__ENDPOINT` | 皮肤渲染服务 |
 | `API_CLOUDCONFIG` | 云控配置（JSON 对象） |
+| `COMMSPT_SIMPLE_RESPONSE_FILE` | 简易问答内容 JSON 文件路径（默认项目根目录 `commspt_simple_response.json`） |
 
 ### 3. 运行
 
@@ -97,8 +99,9 @@ uv run python -m nonebot ...     # 由 nb-cli 生成启动脚本
 uv run pytest -q
 ```
 
-包含 48 个测试：插件加载、37 个命令注册、命令参数解析（`Match` / `At` / 默认值 / 别名）、
-群白名单、管理员权限、以及业务逻辑直连测试（禁言 / 撤回 / 全员禁言的 API 调用参数）。
+包含 55 个测试：插件加载、37 个命令注册、命令参数解析（`Match` / `At` / 默认值 / 别名）、
+群白名单、管理员权限、业务逻辑直连测试（禁言 / 撤回 / 全员禁言的 API 调用参数），
+以及简易问答 JSON 加载测试（`tests/test_simple_response.py`，覆盖默认路径、环境变量覆盖、文件缺失等场景）。
 
 ## 平台支持说明
 

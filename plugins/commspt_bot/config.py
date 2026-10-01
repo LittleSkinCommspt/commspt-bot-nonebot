@@ -28,6 +28,12 @@
       - 10001
       - 10002
 
+3. 简易问答内容文件：静态问答（simple_response）所用的 JSON 内容文件，
+   默认位于项目根目录的 commspt_simple_response.json（可通过环境变量 COMMSPT_SIMPLE_RESPONSE_FILE 覆盖路径）。
+
+4. 插件静态资源目录：字体、图片等静态资源所在目录，
+   默认位于项目根目录的 assets/（可通过环境变量 COMMSPT_ASSETS_DIR 覆盖路径）。
+
 配置规则说明：
 - 嵌套环境变量：配置模型中的嵌套字段在环境变量中使用双下划线 `__` 分隔（如 `DEFINED_QQ__LITTLESKIN_MAIN` 映射到 `Setting.defined_qq.littleskin_main`）。
 - 复杂类型：非复杂类型（字符串/数字/布尔值）直接书写；字典对象（如 `API_CLOUDCONFIG`）使用标准 JSON 格式书写。
@@ -36,11 +42,12 @@
 导出的主要模块级常量与单例：
 - BASE_DIR: 插件根目录绝对路径
 - PROJECT_ROOT: 项目根目录绝对路径
-- ASSETS_DIR: 插件静态资源（字体、图片等）目录路径
+- ASSETS_DIR: 插件静态资源（字体、图片等）目录路径（默认项目根目录的 assets，可用 COMMSPT_ASSETS_DIR 覆盖）
 - TEMPLATE_DIR: Jinja2 渲染模板文件目录路径
 - VERIFY_CONTENT: 预设支持 HTTP/2 ALPN 协商的 SSLContext 对象
 - JOIN_ANNOUNCEMENT_FILE: 新成员进群公告缓存文件路径（项目工作目录下的 .join-announcement.txt）
 - CONFIG_FILE: config.yml 配置文件路径（默认项目根目录，可用 COMMSPT_CONFIG_FILE 覆盖）
+- SIMPLE_RESPONSE_FILE: 简易问答内容文件路径（默认项目根目录的 commspt_simple_response.json，可用 COMMSPT_SIMPLE_RESPONSE_FILE 覆盖）
 - S_: 插件全局配置对象单例（来自 .env）
 - C_: 应用配置对象单例（来自 config.yml）
 """
@@ -57,11 +64,15 @@ from pydantic import BaseModel, ConfigDict
 # 插件根目录及静态资源、模板路径
 BASE_DIR = Path(__file__).parent
 PROJECT_ROOT = BASE_DIR.parent.parent
-ASSETS_DIR = BASE_DIR / "assets"
+# 插件静态资源（字体、图片等）目录路径，默认位于项目根目录，可用环境变量覆盖
+ASSETS_DIR = Path(os.environ.get("COMMSPT_ASSETS_DIR", str(PROJECT_ROOT / "assets")))
 TEMPLATE_DIR = BASE_DIR / "templates"
 
 # 应用配置文件（config.yml）路径，默认位于项目根目录，可用环境变量覆盖
 CONFIG_FILE = Path(os.environ.get("COMMSPT_CONFIG_FILE", str(PROJECT_ROOT / "config.yml")))
+
+# 简易问答（simple_response）内容文件路径，默认位于项目根目录，可用环境变量覆盖
+SIMPLE_RESPONSE_FILE = Path(os.environ.get("COMMSPT_SIMPLE_RESPONSE_FILE", str(PROJECT_ROOT / "commspt_simple_response.json")))
 
 # 等价于旧版 httpx.create_ssl_context(verify=..., http2=True)：
 # httpx 0.28 起不再提供 http2 参数，需自行设置 ALPN 以协商 HTTP/2

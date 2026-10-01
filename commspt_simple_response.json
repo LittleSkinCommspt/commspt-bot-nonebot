@@ -1,0 +1,63 @@
+{
+  "ping": {
+    "reply": true,
+    "text": "在"
+  },
+  "help": {
+    "text": "请参阅 https://bot-manual.commspt.littlesk.in/\n源码请参见 https://github.com/LittleSkinCommspt/commspt-bot-avilla\n\n请注意查看使用条例；在此提醒您: **请不要滥用机器人的任何功能，不然你有可能会被某个神秘人士出警**"
+  },
+  "cafe": {
+    "images": [
+      "images/honoka_cafe_ng.png"
+    ],
+    "text": "本群不允许讨论非 LittleSkin 问题和闲聊，可以加入 Honoka Café 和大家一起水群。\n群号: 651672723"
+  },
+  "browser": {
+    "images": [
+      "images/browser.png"
+    ],
+    "text": "详见 https://manual.littlesk.in/faq/site#broken-webpage"
+  },
+  "log.csl": {
+    "aliases": [
+      "csl.log"
+    ],
+    "text": "CustomSkinLoader 的日志位于 .minecraft/CustomSkinLoader/CustomSkinLoader.log\n在使用版本隔离的情况下则为 .minecraft/versions/{version}/CustomSkinLoader/CustomSkinLoader.log\n\n请将 CustomSkinLoader 日志文件直接发送至群内。\n\n详见 https://manual.littlesk.in/problems#customskinloader"
+  },
+  "log.mc": {
+    "text": "请使用启动器的「测试游戏」功能启动游戏，并在复现问题后导出日志发送至群内。如果问题与外置登录有关，请在启动器的「JVM 参数（Java 虚拟机参数）」设置中填入 -Dauthlibinjector.debug"
+  },
+  "csl.config": {
+    "text": "若安装了 CustomSkinLoader 后无法正确加载皮肤，可能是当前角色名被同名正版优先加载，可通过以下方法手动修改 CustomSkinLoader 的加载顺序：\nhttps://manual.littlesk.in/newbee/csl#edit-csl-config"
+  },
+  "pay": {
+    "text": "在群里和大佬吹牛逼帮助不了你的问题？\n速来 https://afdian.com/a/tnqzh123\n获取一对一帮助服务即可快速解决你的问题！"
+  },
+  "manual": {
+    "images": [
+      "images/rtfm.png"
+    ],
+    "text": "请仔细阅读 LittleSkin 用户使用手册，特别是「常见问题解答」！\nhttps://manual.littlesk.in/"
+  },
+  "pro_verify": {
+    "text": "目前在 LittleSkin 验证正版后会产生如下影响：\n· 在主页上获得一个「正版」（英文也为「正版」）徽标\n· 赠送您 1000 积分；\n· 在皮肤站内取回您的正版 ID 对应的角色（如果您的 ID 已被人抢注）。\n\n请参考 https://manual.littlesk.in/newbee/premium\n\n使用「正版验证」的前提是「您购买了正版并在官方启动器启动过一次游戏」；如您的目的并不是这个，请考虑换种问法提问。\n\n请注意，无论是否进行正版验证，您的 LittleSkin 外置登录账号始终不具备正版的属性，性质 **仍为离线账号**。\n您无法将 LittleSkin 外置登录账号代替正版账号使用。"
+  },
+  "ygg.online_mode": {
+    "text": "请确认服务器正确配置 authlib-injector 并将 online-mode 设为 true，否则请使用 CustomSkinLoader。\n如果服务器未开启「正版验证」则所有登录方式都会被服务器视为离线模式处理；\n即服务器自行生成 UUID，且不会向验证服务器（皮肤站 / 正版）获取材质。\n详细：https://manual.littlesk.in/yggdrasil/"
+  },
+  "cape_format": {
+    "text": "「不是有效的披风文件」\nLittleSkin 对于披风文件的格式要求如下：\n· png 格式文件\n· 宽高比需为 2:1\n· 为 64x32 的整倍数"
+  },
+  "network": {
+    "text": "「登录失败：身份验证服务器目前正在停机维护」\n「无法验证用户名」\n「验证服务器他们宕了吗？」：\n玄学的网络问题会导致此情况的出现，请优先检查您的网络环境和使用的域名是否为 littleskin.cn，并在重启游戏后再次尝试登录。\n\n如果您位于福建省，有概率因为地区性的 DNS 污染而导致无法连接到 LittleSkin。\n此时请您查阅群公告以解决此问题。\n有时部分无法连接的问题也可通过群公告的教程解决。"
+  },
+  "faq": {
+    "text": "请您查看手册上的 常见问题解答 (FAQ) 章节，尝试按照手册上的指示自行解决您的问题。如无法解决请您继续询问。\nhttps://manual.littlesk.in/faq"
+  },
+  "hta": {
+    "text": "请您阅读手册上的 遇到问题了咋办 章节后，准备好可能需要的 信息 / 文件 后，再来询问，否则有可能无法获得 (社区) 支持组 的帮助！\nhttps://manual.littlesk.in/problems"
+  },
+  "copyright": {
+    "text": "「版权申诉」\n请准备可以证明材质所有者的相关资料，以便进行申诉。\n相关资料如：\n- 材质的工程文件 / 约稿记录\n- 在其他平台的材质发布帖 / 创作动态\n- ... 等\n\n并准备好您的 UID，您的 QQ 号，需申诉材质的 TID（如需要申诉多个材质，可使用 txt 文件，一行一个材质链接，附在 zip 内） 等信息。\n\n请将这些文件统一使用 zip 格式打包，并使用您在 LittleSkin 绑定的邮箱，通过 邮件附件 的方式发送至 support@littlesk.in 以进行申诉。我们一般会在 7 个工作日内处理您的请求。"
+  }
+}

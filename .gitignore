@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# uv
+.uv/
+
+# NoneBot 本地配置与数据
+.env
+.env.dev
+.env.prod
+*.log
+data/
+cache/
+join-announcement.txt
+.join-announcement.txt
+
+# 测试（不纳入版本控制）
+tests/
+
+# 测试与工具缓存
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# IDE
+.vscode/settings.json
+.idea/

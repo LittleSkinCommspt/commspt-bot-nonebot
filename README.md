@@ -11,6 +11,7 @@ LittleSkin 社区支持 QQ 机器人 —— **NoneBot2 + Alconna** 实现，由 
 ## 目录结构
 
 ```
+assets/                               # 图片与字体（可通过 COMMSPT_ASSETS_DIR 覆盖）
 plugins/commspt_bot/              # 父插件（共享层）
 ├── __init__.py                   # PluginMetadata + 自动加载子插件
 ├── config.py                     # 配置 schema（值请写在 .env）
@@ -31,7 +32,6 @@ plugins/commspt_bot/              # 父插件（共享层）
 │   ├── mongodb_manager.py        # UID 映射读写
 │   └── random_sleep.py           # 随机延时（拟人化）
 ├── templates/                    # 用户信息卡模板
-├── assets/                       # 图片与字体
 └── plugins/                      # 13 个子插件（每个功能一个）
     ├── commspt_simple_response.py    # 静态问答（&help / &faq / &pay ...）；回复内容见根目录 commspt_simple_response.json
     ├── commspt_profile.py            # &ygg / &pro 玩家查询
@@ -67,6 +67,7 @@ cp config.yml.example config.yml
 `LITTLESKIN_ADMIN_TOKEN`、`DB_MONGO__URL` 等。**简单与嵌套配置从 `.env` 读取（`config.py` 的 `Setting` 只定义 schema）；
 结构化列表配置从 `config.yml` 读取（默认位于项目根目录，可用 `COMMSPT_CONFIG_FILE` 覆盖路径）。**
 简易问答（`&help` / `&faq` / `&pay` 等）的回复内容在项目根目录的 `commspt_simple_response.json` 中编辑，可通过 `COMMSPT_SIMPLE_RESPONSE_FILE` 环境变量覆盖路径。
+静态资源（图片、字体）默认存放在项目根目录的 `assets/` 下，可通过 `COMMSPT_ASSETS_DIR` 环境变量覆盖。
 
 配置项说明：
 
@@ -85,6 +86,7 @@ cp config.yml.example config.yml
 | `API_SKINRENDERMC__ENDPOINT` | 皮肤渲染服务 |
 | `API_CLOUDCONFIG` | 云控配置（JSON 对象） |
 | `COMMSPT_SIMPLE_RESPONSE_FILE` | 简易问答内容 JSON 文件路径（默认项目根目录 `commspt_simple_response.json`） |
+| `COMMSPT_ASSETS_DIR` | 静态资源目录（默认项目根目录 `assets/`） |
 
 ### 3. 运行
 
@@ -99,9 +101,59 @@ uv run python -m nonebot ...     # 由 nb-cli 生成启动脚本
 uv run pytest -q
 ```
 
-包含 55 个测试：插件加载、37 个命令注册、命令参数解析（`Match` / `At` / 默认值 / 别名）、
+包含 59 个测试：插件加载、37 个命令注册、命令参数解析（`Match` / `At` / 默认值 / 别名）、
 群白名单、管理员权限、业务逻辑直连测试（禁言 / 撤回 / 全员禁言的 API 调用参数），
-以及简易问答 JSON 加载测试（`tests/test_simple_response.py`，覆盖默认路径、环境变量覆盖、文件缺失等场景）。
+以及简易问答 JSON 加载测试（`tests/test_simple_response.py`，覆盖默认路径、环境变量覆盖、文件缺失、schema 校验、有序 `messages` 片段构建等场景）。
+
+## 简易问答内容配置（开发者）
+
+`commspt_simple_response.json` 是一个 JSON 对象，键为**命令名**，值为一条问答条目。
+
+### 条目字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `aliases` | `string[]`（可选） | 别称命令名，例如 `log.csl` 的别名 `csl.log` |
+| `reply` | `bool`（可选，默认 `false`） | 是否引用回复触发消息 |
+| `text` | `string`（可选） | 文本内容，`\n` 表示换行 |
+| `images` | `string[]`（可选） | 图片路径数组，**相对于 `ASSETS_DIR`**（例如 `images/browser.png`）；渲染时图片在前、文本在后 |
+| `messages` | 有序片段数组（可选） | 支持多张图片与图文任意交错；与 `text`/`images` **互斥** |
+
+`messages` 与 `text`/`images` 不能同时出现在同一条目中，加载时会跳过冲突条目并记录错误日志。
+
+### `messages` 片段格式
+
+每个片段是一个带 `type` 的对象：
+
+- `{"type": "text", "content": "..."}` 文本片段
+- `{"type": "image", "path": "images/xxx.png"}` 图片片段（`path` 相对于 `ASSETS_DIR`）
+
+片段按数组顺序渲染，单条回复因此可以携带**多张图片**，也可以任意交错图文。
+
+### 示例
+
+经典 text + images 条目：
+
+```json
+"browser": {
+  "images": [
+    "images/browser.png"
+  ],
+  "text": "详见 https://manual.littlesk.in/faq/site#broken-webpage"
+}
+```
+
+有序多图条目（`messages`）：
+
+```json
+"demo": {
+  "messages": [
+    {"type": "image", "path": "images/browser.png"},
+    {"type": "text",  "content": "网页显示异常请先看手册："},
+    {"type": "image", "path": "images/rtfm.png"}
+  ]
+}
+```
 
 ## 平台支持说明
 

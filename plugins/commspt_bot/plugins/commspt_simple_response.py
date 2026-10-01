@@ -31,7 +31,12 @@ from nonebot_plugin_alconna import on_alconna
 from nonebot_plugin_alconna.uniseg import Image, Text, UniMessage
 
 from plugins.commspt_bot.config import ASSETS_DIR, SIMPLE_RESPONSE_FILE
-from plugins.commspt_bot.models.simple_response import SimpleResponse, load_simple_responses
+from plugins.commspt_bot.models.simple_response import (
+    ImagePart,
+    SimpleResponse,
+    TextPart,
+    load_simple_responses,
+)
 from plugins.commspt_bot.utils.adv_filter import in_preset_cafe
 from plugins.commspt_bot.utils.random_sleep import random_sleep
 
@@ -103,12 +108,23 @@ print("registering simple response...")
 
 
 def _build_message(entry: SimpleResponse) -> UniMessage:
-    """根据 SimpleResponse 条目构建 UniMessage（图片在前，文本在后）。"""
+    """根据 SimpleResponse 条目构建 UniMessage。
+
+    - messages 不为 None 时：按列表顺序渲染（ImagePart → Image，TextPart → Text）
+    - 否则沿用经典格式：图片在前，文本在后
+    """
     msg = UniMessage()
-    for p in entry.images:
-        msg.append(Image(path=ASSETS_DIR / p))
-    if entry.text is not None:
-        msg.append(Text(entry.text))
+    if entry.messages is not None:
+        for part in entry.messages:
+            if isinstance(part, ImagePart):
+                msg.append(Image(path=ASSETS_DIR / part.path))
+            elif isinstance(part, TextPart):
+                msg.append(Text(part.content))
+    else:
+        for p in entry.images:
+            msg.append(Image(path=ASSETS_DIR / p))
+        if entry.text is not None:
+            msg.append(Text(entry.text))
     return msg
 
 

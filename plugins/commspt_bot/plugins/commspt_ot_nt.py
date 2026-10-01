@@ -1,3 +1,13 @@
+"""跨群发送禁止闲聊警告提示。
+
+对应 Avilla 原版 modules/ot_nt.py（OT 即 Off-Topic）。
+原版通过 ctx.scene.into 跨群发送消息，此处利用 send_to_group 辅助函数，
+由管理群向 LittleSkin 主群定向推送禁止水群的警告图文，并在当前群回复确认。
+
+命令：
+- &ot               向 LittleSkin 主群发送禁止闲聊警告图文 (适用群: in_preset_commspt; 权限: 管理员 admin_only)
+"""
+
 from arclet.alconna import Alconna, CommandMeta
 from nonebot_plugin_alconna import on_alconna
 from nonebot_plugin_alconna.uniseg import UniMessage
@@ -22,6 +32,7 @@ ot = on_alconna(
 
 @ot.handle()
 async def _ot():
+    """向主群跨群发送闲聊警告图文，并在当前管理群回复确认。"""
     await send_to_group(
         S_.defined_qq.littleskin_main,
         UniMessage.image(path=ASSETS_DIR / "images" / "honoka cafe ng.png")

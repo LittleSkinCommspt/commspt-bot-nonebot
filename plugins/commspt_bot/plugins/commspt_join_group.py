@@ -1,3 +1,15 @@
+"""LittleSkin 主群与茶馆群入群审核及新成员进群欢迎。
+
+对应 Avilla 原版 modules/join_group.py。
+基于 OneBot V11 的 GroupRequestEvent 与 GroupIncreaseNoticeEvent，
+实现入群申请自动化校验（云控配置/QMail/UID校验）以及入群欢迎与通知频道推送。
+
+事件：
+- GroupRequestEvent: LittleSkin 主群加群申请 (rule=主群; 自动/手动审核)
+- GroupRequestEvent: LittleSkin 茶馆群加群申请 (rule=茶馆群; 自动审核)
+- GroupIncreaseNoticeEvent: LittleSkin 主群新成员进群 (rule=主群; 发送欢迎语与管理通知)
+"""
+
 import arrow
 from nonebot import logger, on_notice, on_request
 from nonebot.adapters.onebot.v11 import (
@@ -18,6 +30,7 @@ from plugins.commspt_bot.utils.random_sleep import random_sleep
 
 
 def _group_rule(group_id: int):
+    """构建仅匹配指定群号事件的 Rule 规则工厂。"""
     async def _checker(event) -> bool:
         return getattr(event, "group_id", None) == group_id
 
@@ -42,21 +55,21 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
         logger.warning(f"(main) request from {applicant} was ignored because request message is empty.")
         return
 
-    answer = req.comment.splitlines()[-1].removeprefix("答案：").strip()
+    answer = req.comment.splitlines()[-1].removeprefix("答案：").strip()  # 从申请留言最后一行提取填写的 UID 答案
     logger.info(f"Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
     message.append(
         f"""新的入群申请 (Main)
 » 申请人 {applicant}
 » 答案     {answer}
 
-id={req.sub_type}_{req.flag}""",
+id={req.sub_type}_{req.flag}""",  # 包含 sub_type 与 flag，用于管理员回复 do 命令审批
     )
 
     try:
         cloudconfig = await CloudConfig.fetch()
-        if cloudconfig.enable_auto_accept_join_request_main:
+        if cloudconfig.enable_auto_accept_join_request_main:  # 云控策略：若启用主群自动同意则直接批准
             await random_sleep(3)  # sleep before action
-            await req.approve(bot)
+            await req.approve(bot)  # 调用 OneBot V11 API 同意入群申请
 
             message.append("👆 已同意 [云控策略：enable_auto_accept_join_request_main]")
             logger.info(
@@ -85,18 +98,18 @@ id={req.sub_type}_{req.flag}""",
     # qmail api verification
     if (ltsk_qmail := await LittleSkinUser.qmail_api(applicant)) and ltsk_qmail.uid == uid:
         # ok: pass verification
-        await UIDMapping(uid=uid, qq=applicant, qmail_verified=True).update()
+        await UIDMapping(uid=uid, qq=applicant, qmail_verified=True).update()  # 记录/更新 QQ 与 UID 映射及验证状态
         logger.success(
             f"(main) Member Join Request Event {req.sub_type} was accepted. (QMAIL PASS) {applicant} > {answer}",
         )
 
         await random_sleep(3)  # sleep before action
-        await req.approve(bot)
+        await req.approve(bot)  # 校验通过，调用 API 同意入群
         message.append("👆 已同意 [QMAIL API passed]")
         return
 
     # lstk uid check
-    if not await LittleSkinUser.uid_info(uid):
+    if not await LittleSkinUser.uid_info(uid):  # 校验所填 UID 是否在 LittleSkin 平台存在
         # failed: uid not exists
         logger.warning(
             f"(main) Member Join Request Event {req.sub_type} was ignored. (UID NOT EXISTS) {applicant} > {answer}",
@@ -106,7 +119,7 @@ id={req.sub_type}_{req.flag}""",
         await _send_to_group(S_.defined_qq.commspt_group, "\n\n".join(m for m in message if m))
         return
 
-    if email_uid := await LittleSkinUser.qmail_api(qq=applicant):
+    if email_uid := await LittleSkinUser.qmail_api(qq=applicant):  # 若申请人 QQ 邮箱曾绑定过其他 UID 则提示可能正确的 UID
         may_current_uid = email_uid.uid
         message.append(f"ⓘ 可能才为正确对应的 UID: {may_current_uid}")
 
@@ -116,7 +129,7 @@ id={req.sub_type}_{req.flag}""",
     message.append("👀 请手动处理")
 
     image: bytes | None = None
-    if ltsk_user := await LittleSkinUser.uid_info(answer):
+    if ltsk_user := await LittleSkinUser.uid_info(answer):  # 查询并渲染用户信息卡片，辅助管理员人工审核
         render = RenderUserInfo(**ltsk_user.model_dump(), qq=int(applicant))
         image = await render.get_image()
     else:
@@ -147,7 +160,7 @@ async def _(bot: Bot, event: GroupRequestEvent):
     if not req.comment:
         return
 
-    answer = req.comment.splitlines()[-1].removeprefix("答案：").strip()
+    answer = req.comment.splitlines()[-1].removeprefix("答案：").strip()  # 从申请留言最后一行提取填写的 UID 答案
     logger.info(f"(cafe) Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
     message.append(
         f"""新的入群申请 (Cafe)
@@ -181,8 +194,8 @@ id={req.sub_type}_{req.flag}""",
 
     # general: approve
     mapping_uid = await UIDMapping.fetch(qq=applicant)
-    status = "✅" if (mapping_uid and mapping_uid.uid == uid) else "⚠️"
-    await req.approve(bot)
+    status = "✅" if (mapping_uid and mapping_uid.uid == uid) else "⚠️"  # 检查是否与主群记录的 UID 映射一致
+    await req.approve(bot)  # 茶馆群只要 UID 存在即自动同意入群
     await _send_to_group(S_.defined_qq.littleskin_cafe, f"(RESULT) Mapping {status}: QQ {applicant} -> UID {uid}")
 
 
@@ -205,7 +218,7 @@ async def _(bot: Bot, event: GroupIncreaseNoticeEvent):
     welcome_msg = UniMessage(At("user", str(event.user_id))) + " "
     nofi_msg = [f"用户已入群 > {event.user_id}"]
 
-    uid_mapping = await UIDMapping.fetch(qq=event.user_id)
+    uid_mapping = await UIDMapping.fetch(qq=event.user_id)  # 查询新成员已绑定的 UID 信息
 
     # add UID info
     if uid_mapping:
@@ -223,7 +236,7 @@ async def _(bot: Bot, event: GroupIncreaseNoticeEvent):
         cloudconfig = await CloudConfig.fetch()
         if cloudconfig.enable_temporary_welcome_message_main:
             # override join announcement if temporary welcome message is enabled
-            join_announcement = cloudconfig.temporary_welcome_message_main
+            join_announcement = cloudconfig.temporary_welcome_message_main  # 云控策略启用时优先使用临时欢迎语
     except Exception as e:
         logger.exception(e)
 
@@ -237,7 +250,7 @@ async def _(bot: Bot, event: GroupIncreaseNoticeEvent):
     image: bytes | None = None  # pre define
 
     if uid_mapping:
-        ltsk_user = await LittleSkinUser.uid_info(uid_mapping.uid)
+        ltsk_user = await LittleSkinUser.uid_info(uid_mapping.uid)  # 获取 LittleSkin 用户详细信息用于拼装管理审核通知
         # if qmail verified (only noti)
         if uid_mapping.qmail_verified:
             nofi_msg.append("QMAIL ✅ 验证通过")

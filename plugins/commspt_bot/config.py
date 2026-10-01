@@ -1,6 +1,7 @@
-"""commspt-bot 配置
+"""commspt-bot 插件配置与运行常量
 
-本文件只定义配置 schema，实际取值请写在项目根目录的 .env 中（大小写不敏感）：
+本文件定义插件配置 Schema，并通过 NoneBot 的 get_plugin_config(Setting) 导出配置单例 S_。
+实际配置值从项目根目录的 .env 文件中读取（大小写不敏感）：
 
     COMMAND_PROMPT=&
     DEFINED_QQ__FORWARD_BOT=123456
@@ -21,7 +22,17 @@
     ADMIN_LIST=[10001,10002]
     LITTLESKIN_ADMIN_TOKEN=...
 
-非复杂类型（字符串/数字）直接写值，列表与对象类型使用 JSON 书写。
+配置规则说明：
+- 嵌套环境变量：配置模型中的嵌套字段在环境变量中使用双下划线 `__` 分隔（如 `DEFINED_QQ__LITTLESKIN_MAIN` 映射到 `Setting.defined_qq.littleskin_main`）。
+- 复杂类型：非复杂类型（字符串/数字/布尔值）直接书写；列表（如 `ADMIN_LIST`）与字典对象（如 `API_CLOUDCONFIG`）使用标准 JSON 格式书写。
+
+导出的主要模块级常量与单例：
+- BASE_DIR: 插件根目录绝对路径
+- ASSETS_DIR: 插件静态资源（字体、图片等）目录路径
+- TEMPLATE_DIR: Jinja2 渲染模板文件目录路径
+- VERIFY_CONTENT: 预设支持 HTTP/2 ALPN 协商的 SSLContext 对象
+- JOIN_ANNOUNCEMENT_FILE: 新成员进群公告缓存文件路径（项目工作目录下的 .join-announcement.txt）
+- S_: 插件全局配置对象单例
 """
 
 import ssl
@@ -30,6 +41,7 @@ from pathlib import Path
 from nonebot import get_plugin_config
 from pydantic import BaseModel
 
+# 插件根目录及静态资源、模板路径
 BASE_DIR = Path(__file__).parent
 ASSETS_DIR = BASE_DIR / "assets"
 TEMPLATE_DIR = BASE_DIR / "templates"
@@ -39,6 +51,7 @@ TEMPLATE_DIR = BASE_DIR / "templates"
 VERIFY_CONTENT = ssl.create_default_context()
 VERIFY_CONTENT.set_alpn_protocols(["h2", "http/1.1"])
 
+# 新成员入群公告暂存文件路径（保存在当前工作目录下）
 JOIN_ANNOUNCEMENT_FILE = Path.cwd() / ".join-announcement.txt"
 
 
@@ -98,4 +111,5 @@ class Setting(BaseModel):
     littleskin_admin_token: str = ""
 
 
+# 读取并导出全局插件配置单例
 S_ = get_plugin_config(Setting)

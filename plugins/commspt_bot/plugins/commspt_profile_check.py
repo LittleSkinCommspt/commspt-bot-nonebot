@@ -1,3 +1,12 @@
+"""玩家多源档案与皮肤状态体检插件
+
+移植自原 Avilla 版 profile_check.py 模块，用于排查玩家皮肤加载异常与同名冲突。
+提供 CSL / Yggdrasil / 正版 Mojang 的状态预检与哈希查询工具函数，并通过 &check 命令生成综合排查报告。
+
+命令：
+- &check <player_name>   多源核对角色存在性、同名正版与皮肤标准尺寸   (适用群: in_preset_cafe; 权限: admin_only)
+"""
+
 import traceback
 from io import BytesIO
 
@@ -31,28 +40,34 @@ def check_image_size_64(data: bytes) -> bool:
 
 
 async def check_pro_exists(player_name: str) -> bool:
+    """检查正版 Mojang 是否存在同名角色。"""
     return bool(await get_ygg_player(player_type="pro", player_name=player_name))
 
 
 async def check_ltsk_ygg_exists(player_name: str) -> bool:
+    """检查 LittleSkin Yggdrasil API 是否存在该角色。"""
     return bool(await get_ygg_player(player_type="ltsk", player_name=player_name))
 
 
 async def check_ltsk_csl_exists(player_name: str) -> bool:
+    """检查 LittleSkin CSL (CustomSkinLoader) 接口是否存在该角色。"""
     csl_player = await get_csl_player(player_name=player_name)
     return (bool(csl_player) and (csl_player.player_existed or False)) or False
 
 
 async def check_ltsk_orogin_ygg_exists(player_name: str) -> bool:
+    """直连源站（绕过缓存/CDN）检查 LittleSkin Yggdrasil 是否存在该角色。"""
     return bool(await get_ygg_player(player_type="ltsk", player_name=player_name, origin=True))
 
 
 async def check_ltsk_origin_csl_exists(player_name: str) -> bool:
+    """直连源站（绕过缓存/CDN）检查 LittleSkin CSL 是否存在该角色。"""
     csl_player = await get_csl_player(player_name=player_name, origin=True)
     return (bool(csl_player) and (csl_player.player_existed or False)) or False
 
 
 async def get_ygg_skin_hash(player_name: str) -> tuple[str | None, str | None]:
+    """获取 LittleSkin Yggdrasil 接口中角色的皮肤和披风哈希。"""
     player = await get_ygg_player(player_type="ltsk", player_name=player_name)
     if not player:
         return None, None
@@ -60,6 +75,7 @@ async def get_ygg_skin_hash(player_name: str) -> tuple[str | None, str | None]:
 
 
 async def get_csl_skin_hash(player_name: str) -> tuple[str | None, str | None]:
+    """获取 LittleSkin CSL 接口中角色的皮肤和披风哈希。"""
     player = await get_csl_player(player_name=player_name)
     if not player:
         return None, None
@@ -67,6 +83,7 @@ async def get_csl_skin_hash(player_name: str) -> tuple[str | None, str | None]:
 
 
 async def get_ygg_origin_skin_hash(player_name: str) -> tuple[str | None, str | None]:
+    """直连源站获取 LittleSkin Yggdrasil 接口中角色的皮肤和披风哈希。"""
     player = await get_ygg_player(player_type="ltsk", player_name=player_name)
     if not player:
         return None, None
@@ -74,6 +91,7 @@ async def get_ygg_origin_skin_hash(player_name: str) -> tuple[str | None, str | 
 
 
 async def get_csl_origin_skin_hash(player_name: str) -> tuple[str | None, str | None]:
+    """直连源站获取 LittleSkin CSL 接口中角色的皮肤和披风哈希。"""
     player = await get_csl_player(player_name=player_name)
     if not player:
         return None, None
@@ -81,6 +99,7 @@ async def get_csl_origin_skin_hash(player_name: str) -> tuple[str | None, str | 
 
 
 def translate_bool(value: bool, yes_word: str = "", no_word: str = "不") -> str:
+    """将布尔值转换为自定义的肯定或否定文字表述。"""
     return yes_word if value else no_word
 
 
@@ -101,13 +120,14 @@ check = on_alconna(
 
 @check.handle()
 async def check_profile(player_name: Match[str]):
+    """执行玩家体检流程，核对 CSL、Yggdrasil 及正版同名状态并发送报告。"""
     messages = [f"🔍 {player_name.result} \t的检查报告", ""]
 
     ygg_profile: PlayerProfile | None = None
     pro_profile: PlayerProfile | None = None
     csl_profile: CustomSkinLoaderApi | None = None
 
-    # CSL
+    # CSL: 检查 LittleSkin CSL 接口是否存在该玩家
     try:
         csl_profile = await get_csl_player(player_name=player_name.result)
         if csl_profile is None or not csl_profile.player_existed:
@@ -120,7 +140,7 @@ async def check_profile(player_name: Match[str]):
     finally:
         messages.append("")
 
-    # Ygg LittleSkin
+    # Ygg LittleSkin: 检查 LittleSkin Yggdrasil 接口，核对大小写及材质尺寸
     try:
         ygg_profile = await get_ygg_player(player_type="ltsk", player_name=player_name.result)
         if ygg_profile.name != player_name.result:
@@ -130,6 +150,7 @@ async def check_profile(player_name: Match[str]):
         if ygg_profile.skin is None:
             messages.append("❌ Ygg: 未设置皮肤")
         else:
+            # 下载皮肤图片并检验是否符合原版 64x64 尺寸
             async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
                 response = await client.get(str(ygg_profile.skin.url))
                 response.raise_for_status()
@@ -143,7 +164,7 @@ async def check_profile(player_name: Match[str]):
     finally:
         messages.append("")
 
-    # Ygg Minecraft.net
+    # Ygg Minecraft.net: 检查 Mojang 正版是否存在同名角色或非法字符
     try:
         pro_profile = await get_ygg_player(player_type="pro", player_name=player_name.result)
         messages.append(f"⚠️ 正版: 存在同名角色 👉 {pro_profile.name} / {pro_profile.id}")

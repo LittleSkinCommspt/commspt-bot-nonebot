@@ -1,0 +1,7 @@
+# commspt-bot 应用配置示例
+# config.yml 默认从项目根目录读取，也可通过环境变量 COMMSPT_CONFIG_FILE 指定路径。
+
+# 管理员 QQ 号列表（可执行 %mute / %check / do 等管理员命令）
+admin_list:
+  - 123
+  - 456

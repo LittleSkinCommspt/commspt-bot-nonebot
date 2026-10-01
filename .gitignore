@@ -13,6 +13,7 @@ venv/
 .env
 .env.dev
 .env.prod
+config.yml
 *.log
 data/
 cache/
@@ -26,6 +27,9 @@ tests/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# OMO / OpenCode 运行时状态
+.omo/
 
 # IDE
 .vscode/settings.json

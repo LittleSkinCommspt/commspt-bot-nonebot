@@ -15,7 +15,6 @@ from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot_plugin_alconna import At, Match, on_alconna
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.littleskin_api import LittleSkinUser
 from plugins.commspt_bot.models.mongodb_data import UIDMapping
 from plugins.commspt_bot.models.render_user_info import RenderUserInfo
@@ -28,12 +27,12 @@ from plugins.commspt_bot.utils.mongodb_manager import write_uid_db
 
 user_info = on_alconna(
     Alconna(
-        f"{S_.command_prompt}user",
+        "user",
         Args["uid#UID", int],
         meta=CommandMeta(
             description="查询用户信息 (commspt [group] only)",
-            usage=rf"{S_.command_prompt}user <uid>",
-            example=rf"{S_.command_prompt}user 123456",
+            usage=r"&user <uid>",
+            example=r"&user 123456",
         ),
     ),
     rule=in_preset_commspt,
@@ -65,12 +64,12 @@ async def _user_info(uid: Match[int]):
 
 set_uid = on_alconna(
     Alconna(
-        f"{S_.command_prompt}setuid",
+        "setuid",
         Args["target#目标", At | int]["uid#UID", int],
         meta=CommandMeta(
             description="设置用户记录的 UID (commspt only)",
-            usage=rf"{S_.command_prompt}setuid <target> <uid>",
-            example=rf"{S_.command_prompt}setuid @SerinaNya 15301",
+            usage=r"&setuid <target> <uid>",
+            example=r"&setuid @SerinaNya 15301",
         ),
     ),
     rule=in_preset_cafe,

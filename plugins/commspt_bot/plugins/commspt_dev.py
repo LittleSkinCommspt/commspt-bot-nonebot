@@ -13,16 +13,15 @@ from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot_plugin_alconna import on_alconna
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.utils.adv_filter import admin_only, in_preset_commspt
 
 id_cmd = on_alconna(
     Alconna(
-        f"{S_.command_prompt}id",
+        "id",
         meta=CommandMeta(
             description="获取环境 ID (commspt only)",
-            usage=f"{S_.command_prompt}id",
-            example=f"{S_.command_prompt}id",
+            usage="&id",
+            example="&id",
         ),
     ),
     rule=in_preset_commspt,

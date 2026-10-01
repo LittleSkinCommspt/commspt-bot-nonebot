@@ -12,19 +12,18 @@ from nonebot import logger
 from nonebot_plugin_alconna import At, Match, on_alconna
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.mongodb_data import UIDMapping
 from plugins.commspt_bot.utils.adv_filter import admin_only, in_preset_cafe
 from plugins.commspt_bot.utils.random_sleep import random_sleep
 
 uid_cmd = on_alconna(
     Alconna(
-        f"{S_.command_prompt}uid",
+        "uid",
         Args["target#目标", At | int],  # 目标用户，支持 @提及 (At) 或输入纯数字 QQ 号 (int)
         meta=CommandMeta(
             description="查询用户 UID (commspt only)",
-            usage=rf"{S_.command_prompt}uid <target / qq>",
-            example=rf"{S_.command_prompt}uid @user",
+            usage=r"&uid <target / qq>",
+            example=r"&uid @user",
         ),
     ),
     rule=in_preset_cafe,

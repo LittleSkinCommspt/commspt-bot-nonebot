@@ -59,22 +59,25 @@ uv sync
 ### 2. 配置
 
 ```bash
-cp .env.example .env      # 或 .env.prod
+cp .env.example .env                # 或 .env.prod
+cp config.yml.example config.yml
 ```
 
-按需填写：群号（`DEFINED_QQ__*`）、管理员列表（`ADMIN_LIST`）、外部 API 地址、
-`LITTLESKIN_ADMIN_TOKEN`、`DB_MONGO__URL` 等。**所有值都从 `.env` 读取，`config.py` 只定义 schema。**
+按需填写：群号（`DEFINED_QQ__*`）、管理员列表（`config.yml` 中的 `admin_list`）、外部 API 地址、
+`LITTLESKIN_ADMIN_TOKEN`、`DB_MONGO__URL` 等。**简单与嵌套配置从 `.env` 读取（`config.py` 的 `Setting` 只定义 schema）；
+结构化列表配置从 `config.yml` 读取（默认位于项目根目录，可用 `COMMSPT_CONFIG_FILE` 覆盖路径）。**
 
 配置项说明：
 
 | 配置项 | 说明 |
 |---|---|
-| `COMMAND_PROMPT` | 命令前缀，默认 `&` |
+| `COMMAND_START` | 命令前缀（NoneBot 内置），默认 `["&"]` |
+| `ALCONNA_USE_COMMAND_START` | 是否将 `COMMAND_START` 作为 Alconna 全局命令前缀，默认 `true` |
 | `DEFINED_QQ__LITTLESKIN_MAIN` / `__LITTLESKIN_CAFE` | 主群 / 水群群号 |
 | `DEFINED_QQ__COMMSPT_GROUP` | 社区支持组群号 |
 | `DEFINED_QQ__NOTIFICATION_CHANNEL` | 通知群号（入群欢迎通知） |
 | `DEFINED_QQ__DEV_GROUP` | 开发群群号 |
-| `ADMIN_LIST` | 管理员 QQ 列表（JSON 数组） |
+| `admin_list`（`config.yml`） | 管理员 QQ 列表（YAML 数组） |
 | `LITTLESKIN_ADMIN_TOKEN` | LittleSkin Admin API Token |
 | `DB_MONGO__URL` | MongoDB 连接串（QQ↔UID 映射） |
 | `API_BROWSERLESS__ENDPOINT` | browserless 截图服务 |
@@ -123,6 +126,6 @@ uv run pytest -q
 | `ctx.scene.into(f"::group({g})").send_message(x)` | `UniMessage(x).send(Target.group(str(g), ...))` |
 | `Picture(RawResource(b))` | `UniMessage.image(raw=b)` |
 | `MuteCapability` / `RequestCapability` | `bot.set_group_ban` / `event.approve()` |
-| `S_ = Setting(**yaml.safe_load(...))` | `S_ = get_plugin_config(Setting)`（值来自 `.env`） |
+| `S_ = Setting(**yaml.safe_load(...))` | `S_ = get_plugin_config(Setting)`（值来自 `.env`）+ `C_`（列表值来自 `config.yml`） |
 
 原版 `log_file.py`（实验性）以占位形式保留为 `commspt_log_file.py`。

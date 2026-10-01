@@ -32,7 +32,7 @@ from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot_plugin_alconna import on_alconna
 from nonebot_plugin_alconna.uniseg import Image, Text, UniMessage
 
-from plugins.commspt_bot.config import ASSETS_DIR, S_
+from plugins.commspt_bot.config import ASSETS_DIR
 from plugins.commspt_bot.utils.adv_filter import in_preset_cafe
 from plugins.commspt_bot.utils.random_sleep import random_sleep
 
@@ -72,15 +72,15 @@ def register(command: str | list[str], response: str | UniMessage | list, reply:
 
     commands = [command] if isinstance(command, str) else command
     for command_item in commands:
-        logger.info(f"- ✅ {S_.command_prompt}{command_item}")
+        logger.info(f"- ✅ &{command_item}")
 
         # 动态创建独立的 Alconna 匹配器；block=False 确保不阻断其他同优先级的消息处理器
         _matcher = on_alconna(
             Alconna(
-                f"{S_.command_prompt}{command_item}",
+                command_item,
                 meta=CommandMeta(
-                    description=f"{S_.command_prompt}{command_item}",
-                    usage=f"{S_.command_prompt}{command_item}",
+                    description=f"&{command_item}",
+                    usage=f"&{command_item}",
                 ),
             ),
             rule=default_rule,

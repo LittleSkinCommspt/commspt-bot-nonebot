@@ -13,7 +13,6 @@ from arclet.alconna import Alconna, Args, Arparma, CommandMeta
 from nonebot_plugin_alconna import on_alconna
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.version_api import (
     AuthlibInjectorLatest,
     LibericaJavaLatest,
@@ -22,11 +21,11 @@ from plugins.commspt_bot.utils.adv_filter import in_preset_cafe
 
 csl_latest = on_alconna(
     Alconna(
-        f"{S_.command_prompt}csl.latest",
+        "csl.latest",
         meta=CommandMeta(
             description="获取 CustomSkinLoader 最新版本信息",
-            usage=rf"{S_.command_prompt}csl.latest",
-            example=rf"{S_.command_prompt}csl.latest",
+            usage=r"&csl.latest",
+            example=r"&csl.latest",
         ),
     ),
     rule=in_preset_cafe,
@@ -42,11 +41,11 @@ async def _csl_latest():
 
 ygg_latest = on_alconna(
     Alconna(
-        f"{S_.command_prompt}ygg.latest",
+        "ygg.latest",
         meta=CommandMeta(
             description="获取 Yggdrasil 最新版本信息",
-            usage=rf"{S_.command_prompt}ygg.latest",
-            example=rf"{S_.command_prompt}ygg.latest",
+            usage=r"&ygg.latest",
+            example=r"&ygg.latest",
         ),
     ),
     rule=in_preset_cafe,
@@ -69,12 +68,12 @@ async def _ygg_latest():
 # 命令参数：Java 主版本号(默认17)、包类型(默认jre)、操作系统类型(默认windows)、架构(默认x86)
 java_latest = on_alconna(
     Alconna(
-        f"{S_.command_prompt}java.latest",
+        "java.latest",
         Args["version#Java 版本", int, 17]["type#Java 类型", str, "jre"]["os#操作系统类型", str, "windows"]["arch#架构", str, "x86"],
         meta=CommandMeta(
             description="获取 Java 最新版本信息",
-            usage=rf"{S_.command_prompt}java.latest [version] [type] [os] [arch]",
-            example=rf"{S_.command_prompt}java.latest 17 jdk windows x86",
+            usage=r"&java.latest [version] [type] [os] [arch]",
+            example=r"&java.latest 17 jdk windows x86",
         ),
     ),
     rule=in_preset_cafe,

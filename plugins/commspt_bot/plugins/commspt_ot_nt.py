@@ -18,11 +18,11 @@ from plugins.commspt_bot.utils.messenger import send_to_group
 
 ot = on_alconna(
     Alconna(
-        f"{S_.command_prompt}ot",
+        "ot",
         meta=CommandMeta(
-            description=f"{S_.command_prompt}ot",
-            usage=f"{S_.command_prompt}ot",
-            example=f"{S_.command_prompt}ot",
+            description="&ot",
+            usage="&ot",
+            example="&ot",
         ),
     ),
     rule=in_preset_commspt,

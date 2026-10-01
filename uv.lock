@@ -798,6 +798,7 @@ dependencies = [
     { name = "pillow" },
     { name = "pydantic" },
     { name = "pytz" },
+    { name = "pyyaml" },
     { name = "yggdrasil-mc" },
 ]
 
@@ -821,6 +822,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=10.3.0" },
     { name = "pydantic", specifier = ">=2.5.3" },
     { name = "pytz", specifier = ">=2024.1" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "yggdrasil-mc", specifier = "==0.2.7" },
 ]
 

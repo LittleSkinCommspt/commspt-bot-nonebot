@@ -31,12 +31,12 @@ _GROUP_NAME_MAPPING = {
 # MARK: %mute
 mute = on_alconna(
     Alconna(
-        f"{S_.command_prompt}mute",
+        "mute",
         Args["target#目标", int | At]["duration#时长", int, 10]["group#群组", Literal["main", "cafe"] | None, None],
         meta=CommandMeta(
             description="禁言用户 (commspt only)",
-            usage=rf"{S_.command_prompt}mute <target> [duration] [group]",
-            example=rf"{S_.command_prompt}mute @user 10 main",
+            usage=r"&mute <target> [duration] [group]",
+            example=r"&mute @user 10 main",
         ),
     ),
     rule=in_preset_cafe,
@@ -75,12 +75,12 @@ async def _mute(bot: Bot, event: MessageEvent, target: Match[int | At], duration
 # MARK: %unmute
 unmute = on_alconna(
     Alconna(
-        f"{S_.command_prompt}unmute",
+        "unmute",
         Args["target#目标", int | At]["group#群组", Literal["main", "cafe"] | None, None],
         meta=CommandMeta(
             description="解除禁言 (commspt only)",
-            usage=rf"{S_.command_prompt}unmute <target / qq> [group]",
-            example=rf"{S_.command_prompt}unmute @user main",
+            usage=r"&unmute <target / qq> [group]",
+            example=r"&unmute @user main",
         ),
     ),
     rule=in_preset_cafe,
@@ -119,11 +119,11 @@ async def _unmute(bot: Bot, event: MessageEvent, target: Match[int | At], group:
 # MARK: %recall
 recall = on_alconna(
     Alconna(
-        f"{S_.command_prompt}recall",
+        "recall",
         meta=CommandMeta(
             description="撤回消息 (commspt only)",
-            usage=rf"{S_.command_prompt}recall",
-            example=rf"{S_.command_prompt}recall",
+            usage=r"&recall",
+            example=r"&recall",
         ),
     ),
     rule=in_preset_cafe,
@@ -147,12 +147,12 @@ async def _recall(bot: Bot, event: MessageEvent):
 # MARK: %muteall
 muteall = on_alconna(
     Alconna(
-        f"{S_.command_prompt}muteall",
+        "muteall",
         Args["group#群组", Literal["main", "cafe"]],
         meta=CommandMeta(
             description="MUTEALL (commspt only)",
-            usage=rf"{S_.command_prompt}muteall <group>",
-            example=rf"{S_.command_prompt}muteall main",
+            usage=r"&muteall <group>",
+            example=r"&muteall main",
         ),
     ),
     rule=in_preset_cafe,
@@ -169,12 +169,12 @@ async def _mute_all(bot: Bot, group: Match[Literal["main", "cafe"]]):
 
 unmuteall = on_alconna(
     Alconna(
-        f"{S_.command_prompt}unmuteall",
+        "unmuteall",
         Args["group#群组", Literal["main", "cafe"]],
         meta=CommandMeta(
             description="UNMUTEALL (commspt only)",
-            usage=rf"{S_.command_prompt}unmuteall <group>",
-            example=rf"{S_.command_prompt}unmuteall main",
+            usage=r"&unmuteall <group>",
+            example=r"&unmuteall main",
         ),
     ),
     rule=in_preset_cafe,

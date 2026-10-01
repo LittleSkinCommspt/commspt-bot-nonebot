@@ -17,7 +17,6 @@ from httpx import HTTPStatusError
 from nonebot_plugin_alconna import Match, on_alconna
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.const import (
     TZ_SHANGHAI,
     PlayerNotFoundError,
@@ -79,12 +78,12 @@ async def _render_skin(matcher, player_name: str, player_type: str, source: str)
 # 命令参数：player_name 为需要查询的玩家角色名（字符串）
 view = on_alconna(
     Alconna(
-        f"{S_.command_prompt}view",
+        "view",
         Args["player_name#角色名", str],
         meta=CommandMeta(
             description="查看玩家皮肤",
-            usage=rf"{S_.command_prompt}view <player_name>",
-            example=rf"{S_.command_prompt}view SerinaNya",
+            usage=r"&view <player_name>",
+            example=r"&view SerinaNya",
         ),
     ),
     rule=in_preset_cafe,
@@ -93,12 +92,12 @@ view = on_alconna(
 # 命令参数：player_name 为需要查询的玩家角色名（字符串，针对 LittleSkin 显式前缀）
 view_ygg = on_alconna(
     Alconna(
-        f"{S_.command_prompt}view.ygg",
+        "view.ygg",
         Args["player_name#角色名", str],
         meta=CommandMeta(
             description="查看玩家皮肤 (LittleSkin)",
-            usage=rf"{S_.command_prompt}view.ygg <player_name>",
-            example=rf"{S_.command_prompt}view.ygg SerinaNya",
+            usage=r"&view.ygg <player_name>",
+            example=r"&view.ygg SerinaNya",
         ),
     ),
     rule=in_preset_cafe,
@@ -127,6 +126,7 @@ view_pro = on_alconna(
         ),
     ),
     rule=in_preset_cafe,
+    use_cmd_start=False,
 )
 
 

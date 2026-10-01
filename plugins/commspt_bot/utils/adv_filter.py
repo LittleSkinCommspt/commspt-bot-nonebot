@@ -15,7 +15,7 @@ from nonebot.adapters import Event
 from nonebot.permission import Permission
 from nonebot.rule import Rule
 
-from plugins.commspt_bot.config import S_
+from plugins.commspt_bot.config import C_, S_
 
 Q_ = S_.defined_qq
 
@@ -77,8 +77,8 @@ def by_admin_only():
             user_id = event.get_user_id()
         except Exception:
             return False
-        # 用户身份鉴权对应 NoneBot 的 Permission 语义
-        return int(user_id) in S_.admin_list
+        # 用户身份鉴权对应 NoneBot 的 Permission 语义（管理员列表来自 config.yml）
+        return int(user_id) in C_.admin_list
 
     return Permission(_wrapper)
 

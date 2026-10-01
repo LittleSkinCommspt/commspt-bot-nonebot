@@ -13,7 +13,6 @@ from httpx import HTTPStatusError
 from nonebot_plugin_alconna import Match, on_alconna
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.const import PlayerNotFoundError, get_ygg_player
 from plugins.commspt_bot.utils.adv_filter import in_preset_cafe
 from plugins.commspt_bot.utils.random_sleep import random_sleep
@@ -21,12 +20,12 @@ from plugins.commspt_bot.utils.random_sleep import random_sleep
 # region %ygg
 ygg = on_alconna(
     Alconna(
-        f"{S_.command_prompt}ygg",
+        "ygg",
         Args["player_name#角色名", str],
         meta=CommandMeta(
             description="查询 Yggdrasil 玩家信息",
-            usage=rf"{S_.command_prompt}ygg <player_name>",
-            example=rf"{S_.command_prompt}ygg SerinaNya",
+            usage=r"&ygg <player_name>",
+            example=r"&ygg SerinaNya",
         ),
     ),
     rule=in_preset_cafe,
@@ -70,12 +69,12 @@ async def cmd_ygg(player_name: Match[str]):
 # region %pro
 pro = on_alconna(
     Alconna(
-        f"{S_.command_prompt}pro",
+        "pro",
         Args["player_name#角色名", str],
         meta=CommandMeta(
             description="查询 Pro 玩家信息",
-            usage=rf"{S_.command_prompt}ygg <player_name>",
-            example=rf"{S_.command_prompt}ygg SerinaNya",
+            usage=r"&ygg <player_name>",
+            example=r"&ygg SerinaNya",
         ),
     ),
     rule=in_preset_cafe,

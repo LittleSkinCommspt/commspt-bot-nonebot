@@ -35,6 +35,7 @@ do_action = on_alconna(
     ),
     rule=in_preset_cafe,
     permission=admin_only,
+    use_cmd_start=False,
 )
 
 

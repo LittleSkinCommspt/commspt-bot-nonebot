@@ -17,7 +17,6 @@ from nonebot_plugin_alconna import Match, on_alconna
 from nonebot_plugin_alconna.uniseg import UniMessage
 from PIL import Image
 
-from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.const import (
     CustomSkinLoaderApi,
     PlayerNameInvalidError,
@@ -105,12 +104,12 @@ def translate_bool(value: bool, yes_word: str = "", no_word: str = "不") -> str
 
 check = on_alconna(
     Alconna(
-        f"{S_.command_prompt}check",
+        "check",
         Args["player_name#角色名", str],
         meta=CommandMeta(
             description="Check player profile, such as existence and skin hash.",
-            usage=rf"{S_.command_prompt}check <player_name>",
-            example=rf"{S_.command_prompt}check jeb_",
+            usage=r"&check <player_name>",
+            example=r"&check jeb_",
         ),
     ),
     rule=in_preset_cafe,

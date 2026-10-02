@@ -1,33 +1,22 @@
-"""LittleSkin 社区常见问题与快捷回复的静态问答命令集。
+"""LittleSkin 社区常见问题与快捷回复的静态问答分发器。
 
 对应 Avilla 原版 modules/simple_response.py。
-基于 NoneBot2 + Alconna 动态注册命令匹配器，替代原版 AvillaCommands，
-通过 register() 工厂函数批量注册命令，将问答文案或富文本统一包装为 UniMessage 并附带随机延迟回复。
-
-命令：
-- &ping             快速存活检测 (适用群: in_preset_cafe; 权限: 所有人; 引用回复)
-- &help             机器人帮助文档与源码仓库指引 (适用群: in_preset_cafe; 权限: 所有人)
-- &cafe             Honoka Café 水群引导提示与图片 (适用群: in_preset_cafe; 权限: 所有人)
-- &browser          网页显示异常排查指引与示例图 (适用群: in_preset_cafe; 权限: 所有人)
-- &log.csl          CustomSkinLoader 日志路径与提交提示 (适用群: in_preset_cafe; 权限: 所有人)
-- &csl.log          CustomSkinLoader 日志路径与提交提示（同 &log.csl） (适用群: in_preset_cafe; 权限: 所有人)
-- &log.mc           Minecraft 游戏与外置登录调试日志导出提示 (适用群: in_preset_cafe; 权限: 所有人)
-- &csl.config       CustomSkinLoader 配置文件与加载顺序修改指引 (适用群: in_preset_cafe; 权限: 所有人)
-- &pay              爱发电一对一赞助支持渠道链接 (适用群: in_preset_cafe; 权限: 所有人)
-- &manual           LittleSkin 用户使用手册与 RTFM 引导图 (适用群: in_preset_cafe; 权限: 所有人)
-- &pro_verify       LittleSkin 正版验证影响与账号离线性质说明 (适用群: in_preset_cafe; 权限: 所有人)
-- &ygg.online_mode  外置登录服务器 online-mode 配置说明 (适用群: in_preset_cafe; 权限: 所有人)
-- &cape_format      披风图片规格要求说明 (适用群: in_preset_cafe; 权限: 所有人)
-- &network          网络维护及地区 DNS 污染排查建议 (适用群: in_preset_cafe; 权限: 所有人)
-- &faq              手册常见问题解答 (FAQ) 章节指引 (适用群: in_preset_cafe; 权限: 所有人)
-- &hta              提问前准备事项与信息收集指引 (适用群: in_preset_cafe; 权限: 所有人)
-- &copyright        材质版权申诉所需资料与邮件格式说明 (适用群: in_preset_cafe; 权限: 所有人)
+基于单一 on_message 分发器 + 可热重载的内存注册表，替代原版的逐命令 on_alconna 注册。
+命令前缀跟随 COMMAND_START 配置（通过 command_prefix 工具读取），不再硬编码。
+管理员可通过 sreload 命令在运行时重新加载 commspt_simple_response.json，
+新增/删除/修改的命令无需重启即可生效。
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
 from arclet.alconna import Alconna, CommandMeta
-from nonebot import logger
+from nonebot import logger, on_message
 from nonebot.adapters.onebot.v11 import MessageEvent
-from nonebot_plugin_alconna import on_alconna
+from nonebot.matcher import matchers
+from nonebot.typing import T_State
+from nonebot_plugin_alconna import AlconnaMatcher, on_alconna
 from nonebot_plugin_alconna.uniseg import Image, Text, UniMessage
 
 from plugins.commspt_bot.config import ASSETS_DIR, SIMPLE_RESPONSE_FILE
@@ -35,78 +24,41 @@ from plugins.commspt_bot.models.simple_response import (
     ImagePart,
     SimpleResponse,
     TextPart,
-    load_simple_responses,
+    load_simple_responses_checked,
 )
-from plugins.commspt_bot.utils.adv_filter import in_preset_cafe
+from plugins.commspt_bot.utils.adv_filter import admin_only, in_preset_cafe
+from plugins.commspt_bot.utils.command_prefix import display_command, strip_command_prefix
 from plugins.commspt_bot.utils.random_sleep import random_sleep
 
-default_rule = in_preset_cafe
+
+# ---------------------------------------------------------------------------
+# ReloadReport
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class ReloadReport:
+    """reload_registry() 的执行结果。"""
+
+    ok: bool = False
+    error: str | None = None
+    total: int = 0
+    added: set[str] = field(default_factory=set)
+    removed: set[str] = field(default_factory=set)
+    changed: set[str] = field(default_factory=set)
 
 
-# region register
-def register(command: str | list[str], response: str | UniMessage | list, reply: bool = False):
-    """批量注册简易响应命令的工厂函数，将指定命令注册为 Alconna 匹配器并绑定响应处理。
+# ---------------------------------------------------------------------------
+# Registry (module-level mutable state)
+# ---------------------------------------------------------------------------
+_LOOKUP: dict[str, SimpleResponse] = {}
+"""别名展开后的全量查找表：命令名/别名 → SimpleResponse。"""
 
-    Args:
-        command (str): The command to register.
-        response (str | UniMessage | list): The response to send when the command is triggered.
-        reply (bool, optional): Flag indicating whether to reply to the triggering message. Defaults to False.
-
-    Returns:
-        None
-    """
-
-    def _to_unimsg(resp: str | UniMessage | list) -> UniMessage:
-        """将纯文本、UniMessage 或包含图片/文本的列表统一转换为 UniMessage 消息对象。"""
-        if isinstance(resp, UniMessage):
-            return resp
-        if isinstance(resp, str):
-            return UniMessage(resp)
-        msg = UniMessage()
-        for item in resp:
-            if isinstance(item, str):
-                msg.append(Text(item))
-            elif isinstance(item, Image):
-                msg.append(item)
-            else:
-                msg.append(Text(str(item)))
-        return msg
-
-    commands = [command] if isinstance(command, str) else command
-    for command_item in commands:
-        logger.info(f"- ✅ &{command_item}")
-
-        # 动态创建独立的 Alconna 匹配器；block=False 确保不阻断其他同优先级的消息处理器
-        _matcher = on_alconna(
-            Alconna(
-                command_item,
-                meta=CommandMeta(
-                    description=f"&{command_item}",
-                    usage=f"&{command_item}",
-                ),
-            ),
-            rule=default_rule,
-            priority=10,
-            block=False,
-        )
-
-        # 独立函数注册 handler，避免循环变量被闭包捕获共享
-        _register_handler(_matcher, _to_unimsg(response), reply)
+_PRIMARY: dict[str, SimpleResponse] = {}
+"""仅主命令名 → SimpleResponse，用于 reload diff 计算。"""
 
 
-def _register_handler(matcher: type, response: UniMessage, reply: bool):
-    """为单个 matcher 注册响应函数（避免循环变量被闭包共享）"""
-
-    @matcher.handle()
-    async def _simple_response(event: MessageEvent):
-        await random_sleep()  # 随机休眠数秒模拟打字延迟，防风控与刷屏
-        await matcher.send(response, reply_to=reply)
-
-# endregion
-
-print("registering simple response...")
-
-
+# ---------------------------------------------------------------------------
+# _build_message (unchanged — tests import it)
+# ---------------------------------------------------------------------------
 def _build_message(entry: SimpleResponse) -> UniMessage:
     """根据 SimpleResponse 条目构建 UniMessage。
 
@@ -128,11 +80,178 @@ def _build_message(entry: SimpleResponse) -> UniMessage:
     return msg
 
 
-_simple_responses = load_simple_responses(SIMPLE_RESPONSE_FILE)
+# ---------------------------------------------------------------------------
+# Collision scan helper
+# ---------------------------------------------------------------------------
+def _registered_command_paths() -> set[str]:
+    """扫描所有已注册的 AlconnaMatcher，收集其命令路径（不含 ``Alconna::`` 前缀）。"""
+    paths: set[str] = set()
+    for _prio, ms in matchers.items():
+        for m in ms:
+            if issubclass(m, AlconnaMatcher):
+                paths.add(m._command_path.removeprefix("Alconna::"))
+    return paths
 
-for _command, _entry in _simple_responses.items():
-    register(
-        [_command, *_entry.aliases],
-        _build_message(_entry),
-        reply=_entry.reply,
+
+# ---------------------------------------------------------------------------
+# reload_registry
+# ---------------------------------------------------------------------------
+def reload_registry() -> ReloadReport:
+    """从 SIMPLE_RESPONSE_FILE 重新加载注册表，原子替换 _LOOKUP / _PRIMARY。
+
+    - 加载失败：保留原注册表，返回 ``ReloadReport(ok=False, error=...)``。
+    - 加载成功：构建别名展开后的查找表，替换 _LOOKUP/_PRIMARY，
+      diff 计算 added/removed/changed。
+    """
+    global _LOOKUP, _PRIMARY
+
+    loaded = load_simple_responses_checked(SIMPLE_RESPONSE_FILE)
+    if not loaded.ok:
+        return ReloadReport(ok=False, error=loaded.error)
+
+    registered_cmds = _registered_command_paths()
+    reserved = {"sreload"}
+
+    new_lookup: dict[str, SimpleResponse] = {}
+    new_primary: dict[str, SimpleResponse] = {}
+
+    # --- Phase 1: primary names ---
+    for name, entry in loaded.registry.items():
+        if name in reserved:
+            logger.warning(f"简单问答主命令 {name!r} 与保留命令冲突，已跳过")
+            continue
+        if name in registered_cmds:
+            logger.warning(f"简单问答主命令 {name!r} 与已注册 Alconna 命令冲突，已跳过")
+            continue
+        new_lookup[name] = entry
+        new_primary[name] = entry
+
+    # --- Phase 2: aliases ---
+    for name, entry in loaded.registry.items():
+        if name not in new_primary:
+            # primary was skipped
+            continue
+        for alias in entry.aliases:
+            if alias in reserved:
+                logger.warning(f"简单问答别名 {alias!r}（来自 {name!r}）与保留命令冲突，已跳过")
+                continue
+            if alias in registered_cmds:
+                logger.warning(f"简单问答别名 {alias!r}（来自 {name!r}）与已注册 Alconna 命令冲突，已跳过")
+                continue
+            if alias in new_lookup:
+                logger.warning(
+                    f"简单问答别名 {alias!r}（来自 {name!r}）"
+                    f"与已有命令名冲突，已跳过（显式命令名优先）"
+                )
+                continue
+            new_lookup[alias] = entry
+
+    # --- Diff ---
+    old_keys = set(_PRIMARY.keys())
+    new_keys = set(new_primary.keys())
+    added = new_keys - old_keys
+    removed = old_keys - new_keys
+    changed = {k for k in old_keys & new_keys if _PRIMARY[k] != new_primary[k]}
+
+    # --- Atomic swap (GIL-atomic reference assignment) ---
+    _LOOKUP = new_lookup
+    _PRIMARY = new_primary
+
+    return ReloadReport(
+        ok=True,
+        total=len(new_primary),
+        added=added,
+        removed=removed,
+        changed=changed,
     )
+
+
+# ---------------------------------------------------------------------------
+# match_simple_response (pure, testable)
+# ---------------------------------------------------------------------------
+def match_simple_response(plaintext: str) -> SimpleResponse | None:
+    """在当前注册表中查找与 plaintext 匹配的 SimpleResponse。
+
+    流程：lstrip → strip_command_prefix → strip+split → 要求恰好 1 个 token → 查表。
+    """
+    remainder = strip_command_prefix(plaintext.lstrip())
+    if remainder is None:
+        return None
+    tokens = remainder.strip().split()
+    if len(tokens) != 1:
+        return None
+    return _LOOKUP.get(tokens[0])
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher rule
+# ---------------------------------------------------------------------------
+def _sr_rule(event: MessageEvent, state: T_State) -> bool:
+    """匹配规则：在当前注册表中查找命令，命中则将条目存入 state。"""
+    entry = match_simple_response(event.get_plaintext())
+    if entry is None:
+        return False
+    state["sr_entry"] = entry
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Matchers
+# ---------------------------------------------------------------------------
+sr_matcher = on_message(rule=in_preset_cafe & _sr_rule, priority=10, block=True)
+"""单一分发器：服务所有静态问答命令。"""
+
+sreload = on_alconna(
+    Alconna(
+        "sreload",
+        meta=CommandMeta(
+            description=display_command("sreload"),
+            usage=display_command("sreload"),
+        ),
+    ),
+    rule=in_preset_cafe,
+    permission=admin_only,
+    priority=10,
+    block=True,
+)
+"""管理员热重载命令：重新读取 commspt_simple_response.json 并替换注册表。"""
+
+
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
+@sr_matcher.handle()
+async def _handle_simple_response(state: T_State) -> None:
+    entry: SimpleResponse = state["sr_entry"]
+    await random_sleep()
+    await sr_matcher.send(_build_message(entry), reply_to=entry.reply)
+
+
+@sreload.handle()
+async def _handle_sreload() -> None:
+    report = reload_registry()
+    if report.ok:
+        summary = (
+            f"✅ 热重载成功\n"
+            f"  总计: {report.total}\n"
+            f"  新增: {sorted(report.added) or '无'}\n"
+            f"  移除: {sorted(report.removed) or '无'}\n"
+            f"  变更: {sorted(report.changed) or '无'}"
+        )
+        await sreload.send(UniMessage(summary), reply_to=True)
+    else:
+        await sreload.send(
+            UniMessage(f"❌ 热重载失败，保留原配置：{report.error}"),
+            reply_to=True,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Import-time initialization
+# ---------------------------------------------------------------------------
+logger.info("正在加载简单问答注册表...")
+_init_report = reload_registry()
+if _init_report.ok:
+    logger.info(f"简单问答注册表加载完成，共 {_init_report.total} 个命令")
+else:
+    logger.error(f"简单问答注册表加载失败：{_init_report.error}")

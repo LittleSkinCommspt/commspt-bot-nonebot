@@ -33,7 +33,7 @@ plugins/commspt_bot/              # 父插件（共享层）
 │   └── random_sleep.py           # 随机延时（拟人化）
 ├── templates/                    # 用户信息卡模板
 └── plugins/                      # 13 个子插件（每个功能一个）
-    ├── commspt_simple_response.py    # 静态问答（&help / &faq / &pay ...）；回复内容见根目录 commspt_simple_response.json
+    ├── commspt_simple_response.py    # 单一 on_message 分发器，服务 commspt_simple_response.json 中的全部静态问答命令；管理员 &sreload 可在运行时热重载
     ├── commspt_profile.py            # &ygg / &pro 玩家查询
     ├── commspt_view_skin.py          # &view / &view.ygg / %view.pro 皮肤渲染
     ├── commspt_profile_check.py      # &check 玩家体检
@@ -74,7 +74,7 @@ cp config.yml.example config.yml
 | 配置项 | 说明 |
 |---|---|
 | `COMMAND_START` | 命令前缀（NoneBot 内置），默认 `["&"]` |
-| `ALCONNA_USE_COMMAND_START` | 是否将 `COMMAND_START` 作为 Alconna 全局命令前缀，默认 `true` |
+| `ALCONNA_USE_COMMAND_START` | 是否将 `COMMAND_START` 作为 Alconna 全局命令前缀。**库默认值为 `false`**；本项目在 `.env.example` 中设为 `true`，且**必须为 `true`**，否则配置的前缀不会应用到 Alconna 命令（含静态问答分发器的前缀识别）。 |
 | `DEFINED_QQ__LITTLESKIN_MAIN` / `__LITTLESKIN_CAFE` | 主群 / 水群群号 |
 | `DEFINED_QQ__COMMSPT_GROUP` | 社区支持组群号 |
 | `DEFINED_QQ__NOTIFICATION_CHANNEL` | 通知群号（入群欢迎通知） |
@@ -101,7 +101,7 @@ uv run python -m nonebot ...     # 由 nb-cli 生成启动脚本
 uv run pytest -q
 ```
 
-包含 59 个测试：插件加载、37 个命令注册、命令参数解析（`Match` / `At` / 默认值 / 别名）、
+包含 87 个测试：插件加载、21 个 Alconna 命令 + 1 个静态问答分发器（服务 commspt_simple_response.json 中的全部问答命令）的注册、命令参数解析（`Match` / `At` / 默认值 / 别名）、
 群白名单、管理员权限、业务逻辑直连测试（禁言 / 撤回 / 全员禁言的 API 调用参数），
 以及简易问答 JSON 加载测试（`tests/test_simple_response.py`，覆盖默认路径、环境变量覆盖、文件缺失、schema 校验、有序 `messages` 片段构建等场景）。
 
@@ -154,6 +154,17 @@ uv run pytest -q
   ]
 }
 ```
+
+### 运行时热重载（`&sreload`）
+
+编辑 `commspt_simple_response.json` 后，管理员在群内发送配置前缀对应的 `sreload` 命令（默认为 `&sreload`）即可在**不重启机器人**的情况下让变更生效。支持的变更类型包括：新增命令、删除命令、重命名命令（修改键名或 `aliases`）、修改回复文本或图片。
+
+热重载失败（文件格式错误、JSON 解析失败等）时，机器人会向管理员报告错误原因，**保留原配置继续服务**，不会中断现有命令。
+
+注意事项：
+- 键名或别名与 `sreload` 同名的条目会被跳过并记录警告（`sreload` 为保留命令名）。
+- 键名或别名与其他已注册 Alconna 命令同名的条目也会被跳过并记录警告，不会触发双重响应。
+- 热重载是**手动操作**，不存在文件监听或自动触发机制。
 
 ## 平台支持说明
 

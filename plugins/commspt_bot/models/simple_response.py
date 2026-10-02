@@ -9,10 +9,13 @@
 - TextPart: 文本片段（type="text"）
 - ImagePart: 图片片段（type="image"）
 - SimpleResponse: 单条命令响应配置的 pydantic v2 模型
+- SimpleResponseLoad: load_simple_responses_checked 的结果（registry + 解析状态）
 - load_simple_responses: 从指定路径加载并校验配置，失败时降级返回空字典
+- load_simple_responses_checked: 同上，但区分解析失败与合法空文件
 """
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -64,6 +67,56 @@ class SimpleResponse(BaseModel):
         return self
 
 
+@dataclass(frozen=True)
+class SimpleResponseLoad:
+    """load_simple_responses_checked 的加载结果。
+
+    Attributes:
+        registry: 校验通过的条目字典（跳过校验失败的条目）。
+        ok: 顶层解析是否成功（文件存在、JSON 合法且顶层为 dict）。
+        error: ok=False 时的失败原因；ok=True 时为 None。
+    """
+
+    registry: dict[str, SimpleResponse] = field(default_factory=dict)
+    ok: bool = False
+    error: str | None = None
+
+
+def load_simple_responses_checked(path: Path) -> SimpleResponseLoad:
+    """从 JSON 文件加载简单问答配置，逐条校验，并区分解析失败与合法空文件。
+
+    Args:
+        path: 指向 simple response JSON 配置文件的路径。
+
+    Returns:
+        SimpleResponseLoad：文件缺失、读取/解析失败或顶层结构异常时
+        ok=False、error 非空且 registry 为空；顶层为合法 dict 时 ok=True、
+        error 为 None（单条校验失败的条目被跳过并记录日志，不影响 ok）。
+    """
+    if not path.is_file():
+        logger.warning(f"简单问答配置文件不存在：{path}")
+        return SimpleResponseLoad(error=f"配置文件不存在：{path}")
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.error(f"简单问答配置文件读取或解析失败（{path}）：{e}")
+        return SimpleResponseLoad(error=f"读取或解析失败：{e}")
+
+    if not isinstance(raw, dict):
+        logger.error(f"简单问答配置文件顶层结构应为对象（dict），实际为 {type(raw).__name__}：{path}")
+        return SimpleResponseLoad(error=f"顶层结构应为对象（dict），实际为 {type(raw).__name__}")
+
+    result: dict[str, SimpleResponse] = {}
+    for key, value in raw.items():
+        try:
+            result[key] = SimpleResponse.model_validate(value)
+        except pydantic.ValidationError as e:
+            logger.error(f"简单问答配置条目 {key!r} 校验失败，已跳过：{e}")
+
+    return SimpleResponseLoad(registry=result, ok=True)
+
+
 def load_simple_responses(path: Path) -> dict[str, SimpleResponse]:
     """从 JSON 文件加载简单问答配置，逐条校验，失败时降级。
 
@@ -74,25 +127,4 @@ def load_simple_responses(path: Path) -> dict[str, SimpleResponse]:
         校验通过的条目字典；文件缺失或顶层结构异常时返回空字典。
         单条校验失败的条目被跳过，不影响其余条目。
     """
-    if not path.is_file():
-        logger.warning(f"简单问答配置文件不存在：{path}")
-        return {}
-
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.error(f"简单问答配置文件读取或解析失败（{path}）：{e}")
-        return {}
-
-    if not isinstance(raw, dict):
-        logger.error(f"简单问答配置文件顶层结构应为对象（dict），实际为 {type(raw).__name__}：{path}")
-        return {}
-
-    result: dict[str, SimpleResponse] = {}
-    for key, value in raw.items():
-        try:
-            result[key] = SimpleResponse.model_validate(value)
-        except pydantic.ValidationError as e:
-            logger.error(f"简单问答配置条目 {key!r} 校验失败，已跳过：{e}")
-
-    return result
+    return load_simple_responses_checked(path).registry

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 from arclet.alconna import Alconna, CommandMeta
 from nonebot import logger, on_message
+from nonebot.adapters import Bot
 from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot.matcher import matchers
 from nonebot.typing import T_State
@@ -221,10 +222,10 @@ sreload = on_alconna(
 # Handlers
 # ---------------------------------------------------------------------------
 @sr_matcher.handle()
-async def _handle_simple_response(state: T_State) -> None:
+async def _handle_simple_response(bot: Bot, event: MessageEvent, state: T_State) -> None:
     entry: SimpleResponse = state["sr_entry"]
     await random_sleep()
-    await sr_matcher.send(_build_message(entry), reply_to=entry.reply)
+    await _build_message(entry).send(target=event, bot=bot, reply_to=entry.reply)
 
 
 @sreload.handle()

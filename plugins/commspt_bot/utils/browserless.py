@@ -30,7 +30,7 @@ async def screenshot(
     html = template.render(params.model_dump()) if isinstance(params, BaseModel) else template.render(params)
 
     # send request to /screenshot
-    # 使用预设的 VERIFY_CONTENT (已配置 ALPN 支持 h2 与 http/1.1)，适配 httpx 0.28+ 移除 http2 参数后的 HTTP/2 协商
+    # 使用系统证书存储，并通过 ALPN 支持 h2 与 http/1.1。
     async with httpx.AsyncClient(
         base_url=S_.api_browserless.endpoint,
         verify=VERIFY_CONTENT,

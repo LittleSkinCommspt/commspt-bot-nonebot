@@ -12,7 +12,7 @@ from io import BytesIO
 import httpx
 from PIL import Image, ImageDraw, ImageFont
 
-from plugins.commspt_bot.config import ASSETS_DIR, S_
+from plugins.commspt_bot.config import ASSETS_DIR, S_, VERIFY_CONTENT
 
 
 async def request_skinrendermc(skin_url: str | None, cape_url: str | None, name_tag: str | None):
@@ -29,7 +29,12 @@ async def request_skinrendermc(skin_url: str | None, cape_url: str | None, name_
         p.pop(x)
 
     # 建立 HTTP/2 客户端发起 GET 请求，渲染接口耗时通常在 15 秒内
-    async with httpx.AsyncClient(http2=True, base_url=S_.api_skinrendermc.endpoint, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        http2=True,
+        base_url=S_.api_skinrendermc.endpoint,
+        follow_redirects=True,
+        verify=VERIFY_CONTENT,
+    ) as client:
         resp = await client.get(
             "/url/image/both",
             params=p,

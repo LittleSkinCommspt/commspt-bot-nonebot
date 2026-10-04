@@ -56,6 +56,7 @@ import os
 import ssl
 from pathlib import Path
 
+import truststore
 import yaml
 from nonebot import get_plugin_config
 from nonebot.log import logger
@@ -74,9 +75,8 @@ CONFIG_FILE = Path(os.environ.get("COMMSPT_CONFIG_FILE", str(PROJECT_ROOT / "con
 # 简易问答（simple_response）内容文件路径，默认位于项目根目录，可用环境变量覆盖
 SIMPLE_RESPONSE_FILE = Path(os.environ.get("COMMSPT_SIMPLE_RESPONSE_FILE", str(PROJECT_ROOT / "commspt_simple_response.json")))
 
-# 等价于旧版 httpx.create_ssl_context(verify=..., http2=True)：
-# httpx 0.28 起不再提供 http2 参数，需自行设置 ALPN 以协商 HTTP/2
-VERIFY_CONTENT = ssl.create_default_context()
+# 使用操作系统证书存储，并设置 ALPN 以协商 HTTP/2。
+VERIFY_CONTENT = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 VERIFY_CONTENT.set_alpn_protocols(["h2", "http/1.1"])
 
 # 新成员入群公告暂存文件路径（保存在当前工作目录下）

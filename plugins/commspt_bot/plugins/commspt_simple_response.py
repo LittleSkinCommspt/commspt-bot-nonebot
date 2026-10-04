@@ -70,12 +70,22 @@ def _build_message(entry: SimpleResponse) -> UniMessage:
     if entry.messages is not None:
         for part in entry.messages:
             if isinstance(part, ImagePart):
-                msg.append(Image(path=ASSETS_DIR / part.path))
+                img_path = ASSETS_DIR / part.path
+                msg.append(
+                    Image(raw=img_path.read_bytes())
+                    if img_path.is_file()
+                    else Image(path=img_path)
+                )
             elif isinstance(part, TextPart):
                 msg.append(Text(part.content))
     else:
         for p in entry.images:
-            msg.append(Image(path=ASSETS_DIR / p))
+            img_path = ASSETS_DIR / p
+            msg.append(
+                Image(raw=img_path.read_bytes())
+                if img_path.is_file()
+                else Image(path=img_path)
+            )
         if entry.text is not None:
             msg.append(Text(entry.text))
     return msg

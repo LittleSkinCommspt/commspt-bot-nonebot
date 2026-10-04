@@ -17,6 +17,7 @@ from nonebot_plugin_alconna import Match, on_alconna
 from nonebot_plugin_alconna.uniseg import UniMessage
 from PIL import Image
 
+from plugins.commspt_bot.config import VERIFY_CONTENT
 from plugins.commspt_bot.models.const import (
     CustomSkinLoaderApi,
     PlayerNameInvalidError,
@@ -150,7 +151,11 @@ async def check_profile(player_name: Match[str]):
             messages.append("❌ Ygg: 未设置皮肤")
         else:
             # 下载皮肤图片并检验是否符合原版 64x64 尺寸
-            async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                http2=True,
+                follow_redirects=True,
+                verify=VERIFY_CONTENT,
+            ) as client:
                 response = await client.get(str(ygg_profile.skin.url))
                 response.raise_for_status()
                 if not check_image_size_64(response.content):

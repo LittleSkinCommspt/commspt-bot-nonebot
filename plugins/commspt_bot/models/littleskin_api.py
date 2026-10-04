@@ -23,7 +23,7 @@ from pydantic import (
     field_validator,
 )
 
-from plugins.commspt_bot.config import S_
+from plugins.commspt_bot.config import S_, VERIFY_CONTENT
 
 # 使用 AfterValidator 将时间统一规范化为 Asia/Shanghai 时区的 datetime
 StdTime = Annotated[
@@ -69,7 +69,9 @@ class LittleSkinUser(BaseModel):
         """调用 LittleSkin 管理端 API (/api/admin/users) 查询用户信息。"""
         # 使用配置的管理员 Token 进行 Bearer 鉴权，并开启 HTTP/2
         async with httpx.AsyncClient(
-            http2=True, headers={"Authorization": f"Bearer {S_.littleskin_admin_token}"},
+            http2=True,
+            headers={"Authorization": f"Bearer {S_.littleskin_admin_token}"},
+            verify=VERIFY_CONTENT,
         ) as client:
             api = await client.get("https://littleskin.cn/api/admin/users", params={"q": query_string})
             if data := api.json()["data"]:

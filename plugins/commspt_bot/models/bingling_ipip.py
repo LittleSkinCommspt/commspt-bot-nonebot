@@ -49,7 +49,7 @@ class BingLingIPIP(BaseModel):
         }
         ```
         """
-        # 使用配置的 CA 证书内容（VERIFY_CONTENT）进行 SSL 校验，开启 HTTP/2 访问 API 端点
+        # 使用系统证书存储进行 SSL 校验，开启 HTTP/2 访问 API 端点
         async with httpx.AsyncClient(
             verify=VERIFY_CONTENT, base_url=S_.api_bingling_ipip.endpoint, http2=True,
         ) as client:

@@ -23,6 +23,8 @@ from pydantic import (
 from pydantic.fields import Field
 from pydantic.networks import AnyHttpUrl
 
+from plugins.commspt_bot.config import VERIFY_CONTENT
+
 
 class CustomSkinLoaderLatest(BaseModel):
     """CustomSkinLoader GitHub Release 最新版本响应模型。"""
@@ -51,7 +53,7 @@ class CustomSkinLoaderLatest(BaseModel):
         Returns:
             CustomSkinLoaderLatest: CustomSkinLoader 最新版本信息
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
             return cls(
                 **(await client.get("https://api.github.com/repos/CustomSkinLoader/CustomSkinLoader/releases/latest"))
                 .raise_for_status()
@@ -82,7 +84,7 @@ class AuthlibInjectorLatest(BaseModel):
         Returns:
             AuthlibInjectorLatest: Authlib-Injector 最新版本信息
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
             return cls(
                 **(await client.get("https://authlib-injector.yushi.moe/artifact/latest.json"))
                 .raise_for_status()
@@ -146,7 +148,7 @@ class LibericaJavaLatest(BaseModel):
         # 将下划线命名参数转换为 API 接收的中划线命名参数（如 feature_version -> feature-version）
         for key in kwargs:
             kwargs[key.replace("_", "-")] = kwargs.pop(key)
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
             return libereca_releases.validate_python(
                 (
                     await client.get(

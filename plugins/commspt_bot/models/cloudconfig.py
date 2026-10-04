@@ -14,7 +14,7 @@ from typing import Annotated, Self
 import httpx
 from pydantic import BaseModel, Field
 
-from plugins.commspt_bot.config import S_
+from plugins.commspt_bot.config import S_, VERIFY_CONTENT
 
 
 class CloudConfig(BaseModel):
@@ -35,6 +35,11 @@ class CloudConfig(BaseModel):
     async def fetch(cls) -> Self:
         """请求 {S_.api_cloudconfig.endpoint}/bot/ 获取最新云控配置。"""
         # 启用 HTTP/2 与自动重定向请求云控服务端点
-        async with httpx.AsyncClient(http2=True, base_url=S_.api_cloudconfig.endpoint, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            http2=True,
+            base_url=S_.api_cloudconfig.endpoint,
+            follow_redirects=True,
+            verify=VERIFY_CONTENT,
+        ) as client:
             resp = await client.get("/bot/")
             return cls(**resp.json())

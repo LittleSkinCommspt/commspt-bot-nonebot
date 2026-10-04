@@ -15,6 +15,8 @@ from nonebot import logger
 from pydantic import BaseModel, model_validator
 from pydantic.fields import Field
 
+from plugins.commspt_bot.config import VERIFY_CONTENT
+
 
 class CustomSkinLoaderApi(BaseModel):
     """CustomSkinLoader /csl/{name}.json API 响应数据模型。"""
@@ -63,7 +65,7 @@ class CustomSkinLoaderApi(BaseModel):
     @classmethod
     async def get(cls, api_root: str, username: str):
         """请求 {api_root}/{username}.json 获取玩家 CSL 材质配置。"""
-        async with httpx.AsyncClient(base_url=api_root) as client:
+        async with httpx.AsyncClient(base_url=api_root, verify=VERIFY_CONTENT) as client:
             resp = (await client.get(f"{username}.json")).raise_for_status().json()
             if not resp:
                 logger.warning(f"Player {username} not found.")

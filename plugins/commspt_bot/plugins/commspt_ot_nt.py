@@ -33,9 +33,15 @@ ot = on_alconna(
 @ot.handle()
 async def _ot():
     """向主群跨群发送闲聊警告图文，并在当前管理群回复确认。"""
+    img_path = ASSETS_DIR / "images" / "honoka_cafe_ng.png"
+    image = (
+        UniMessage.image(raw=img_path.read_bytes())
+        if img_path.is_file()
+        else UniMessage.image(path=img_path)
+    )
     await send_to_group(
         S_.defined_qq.littleskin_main,
-        UniMessage.image(path=ASSETS_DIR / "images" / "honoka_cafe_ng.png")
+        image
         + """本群不允许闲聊，闲聊请加群 651672723
 大水怪将会收到我们赠送的禁言大礼包。""",
     )

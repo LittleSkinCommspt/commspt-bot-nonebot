@@ -1,12 +1,14 @@
 # commspt-bot-nonebot
 
-LittleSkin 社区支持 QQ 机器人 —— **NoneBot2 + Alconna** 实现，由 [commspt-bot-avilla](https://github.com/LittleSkinCommspt/commspt-bot-avilla)（Avilla 版）移植而来。
+LittleSkin 社区支持 QQ 机器人 —— **NoneBot2（OneBot V11 + Alconna）** 实现，由 [commspt-bot-avilla](https://github.com/LittleSkinCommspt/commspt-bot-avilla)（Avilla 版）移植而来。
 
 ## 特性
 
-- **Alconna 命令规范**：所有命令使用 [Arclet Alconna](https://github.com/ArcletProject/Alconna) 声明式定义，参数强类型校验、自动帮助输出
+- **Alconna 命令规范**：泛平台命令使用 [Arclet Alconna](https://github.com/ArcletProject/Alconna) 声明式定义，参数强类型校验、自动帮助输出
+- **原生 OneBot V11 群管命令**：禁言 / 撤回 / 入群审批等协议相关命令改用 NoneBot 原生 matcher + OneBot V11 消息段交互，不依赖 Alconna / UniMessage
 - **泛平台消息层**：消息收发、图片、@ 均基于 `UniMessage`（UniSeg），命令解析跨平台通用
 - **协议相关动作**：禁言、撤回、入群审批等基于 OneBot V11 API（见下文说明）
+- **双后端出图**：`BROWSERLESS_MODE` 可在远程 Browserless 服务与本地 Playwright 渲染间切换
 
 ## 目录结构
 
@@ -27,7 +29,8 @@ plugins/commspt_bot/              # 父插件（共享层）
 ├── utils/
 │   ├── adv_filter.py             # 群白名单 / 管理员 规则与权限
 │   ├── messenger.py              # 跨群发送工具
-│   ├── browserless.py            # Jinja2 → browserless 截图
+│   ├── browserless.py            # Jinja2 渲染 → Browserless 远程 / 本地 Playwright 截图
+│   ├── onebot_message.py         # 原生命令匹配 / 参数解析 / 引用回复工具
 │   ├── skinrendermcapi.py        # 皮肤渲染 + 水印
 │   ├── mongodb_manager.py        # UID 映射读写
 │   └── random_sleep.py           # 随机延时（拟人化）
@@ -40,9 +43,9 @@ plugins/commspt_bot/              # 父插件（共享层）
     ├── commspt_user_info.py          # &user / &setuid 用户信息卡
     ├── commspt_group_member.py       # &uid QQ↔UID 查询
     ├── commspt_get_latest.py         # &csl.latest / &ygg.latest / &java.latest
-    ├── commspt_mute.py               # &mute / &unmute / &recall / &muteall ...
+    ├── commspt_mute.py               # &mute / &unmute / &recall / &muteall ...（原生 OneBot V11）
     ├── commspt_join_group.py         # 入群申请审核 + 新成员欢迎
-    ├── commspt_do_action_join.py     # do accept|reject 手动审批
+    ├── commspt_do_action_join.py     # do accept|reject 手动审批（裸命令，原生 on_regex）
     ├── commspt_ot_nt.py              # &ot 定向提醒
     ├── commspt_dev.py                # &id 环境信息
     └── commspt_log_file.py           # 群文件消息日志（占位）
@@ -74,7 +77,7 @@ cp config.yml.example config.yml
 | 配置项 | 说明 |
 |---|---|
 | `COMMAND_START` | 命令前缀（NoneBot 内置），默认 `["&"]` |
-| `ALCONNA_USE_COMMAND_START` | 是否将 `COMMAND_START` 作为 Alconna 全局命令前缀。**库默认值为 `false`**；本项目在 `.env.example` 中设为 `true`，且**必须为 `true`**，否则配置的前缀不会应用到一般 Alconna 命令（含静态问答分发器的前缀识别）。入群审批 `do` 命令是局部例外：matcher 使用 `use_cmd_start=False`，并以原始消息守卫强制仅接受无前缀形式。 |
+| `ALCONNA_USE_COMMAND_START` | 是否将 `COMMAND_START` 作为 Alconna 全局命令前缀。**库默认值为 `false`**；本项目在 `.env.example` 中设为 `true`，且**必须为 `true`**，否则配置的前缀不会应用到一般 Alconna 命令（含静态问答分发器的前缀识别）。禁言 / 撤回 / 入群审批等原生命令自行读取纯文本前缀，不受该开关影响。 |
 | `DEFINED_QQ__LITTLESKIN_MAIN` / `__LITTLESKIN_CAFE` | 主群 / 水群群号 |
 | `DEFINED_QQ__COMMSPT_GROUP` | 社区支持组群号 |
 | `DEFINED_QQ__NOTIFICATION_CHANNEL` | 通知群号（入群欢迎通知） |
@@ -82,13 +85,14 @@ cp config.yml.example config.yml
 | `admin_list`（`config.yml`） | 管理员 QQ 列表（YAML 数组） |
 | `LITTLESKIN_ADMIN_TOKEN` | LittleSkin Admin API Token |
 | `DB_MONGO__URL` | MongoDB 连接串（QQ↔UID 映射） |
-| `API_BROWSERLESS__ENDPOINT` | browserless 截图服务 |
+| `API_BROWSERLESS__ENDPOINT` | browserless 截图服务（`BROWSERLESS_MODE=REMOTE` 时使用） |
+| `BROWSERLESS_MODE` | 出图后端：`REMOTE`（默认，调用远程 Browserless）或 `LOCAL`（本地 Playwright 渲染）。`LOCAL` 需先安装可选依赖与浏览器内核：`uv sync --extra render-local && uv run playwright install chromium` |
 | `API_SKINRENDERMC__ENDPOINT` | 皮肤渲染服务 |
 | `API_CLOUDCONFIG` | 云控配置（JSON 对象） |
 | `COMMSPT_SIMPLE_RESPONSE_FILE` | 简易问答内容 JSON 文件路径（默认项目根目录 `commspt_simple_response.json`） |
 | `COMMSPT_ASSETS_DIR` | 静态资源目录（默认项目根目录 `assets/`） |
 
-入群审批 `do` 命令只接受裸命令 `do accept` 或 `do reject [单个不含空白的原因词]`。带全局前缀的 `&do`（例如 `&do accept`）会被 matcher 局部的原始输入守卫明确拒绝，多词拒绝原因也不会匹配。
+入群审批 `do` 命令只接受裸命令 `do accept` 或 `do reject [单个不含空白的原因词]`。`do` 使用前缀无关的原生 `on_regex`，因此带全局前缀的 `&do`（例如 `&do accept`）不会匹配，多词拒绝原因也不会匹配。
 
 ### 3. 运行
 
@@ -103,7 +107,8 @@ uv run python -m nonebot ...     # 由 nb-cli 生成启动脚本
 uv run pytest -q
 ```
 
-测试覆盖插件加载、21 个 Alconna 命令 + 1 个静态问答分发器（服务 commspt_simple_response.json 中的全部问答命令）的注册、命令参数解析（`Match` / `At` / 默认值 / 别名）、
+测试覆盖插件加载、Alconna 命令 + 1 个静态问答分发器（服务 commspt_simple_response.json 中的全部问答命令）的注册、命令参数解析（`Match` / `At` / 默认值 / 别名）、
+原生命令（`&mute` / `&unmute` / `&recall` / `&muteall` / `&unmuteall` / `do`）的规则匹配与参数解析、
 群白名单、管理员权限、业务逻辑直连测试（禁言 / 撤回 / 全员禁言的 API 调用参数），
 以及简易问答 JSON 加载测试（`tests/test_simple_response.py`，覆盖默认路径、环境变量覆盖、文件缺失、schema 校验、有序 `messages` 片段构建等场景）。
 
@@ -165,7 +170,7 @@ uv run pytest -q
 
 注意事项：
 - 键名或别名与 `sreload` 同名的条目会被跳过并记录警告（`sreload` 为保留命令名）。
-- 键名或别名与其他已注册 Alconna 命令同名的条目也会被跳过并记录警告，不会触发双重响应。
+- 键名或别名与其他已注册命令（Alconna 或原生 OneBot V11 群管命令）同名的条目也会被跳过并记录警告，不会触发双重响应。
 - 热重载是**手动操作**，不存在文件监听或自动触发机制。
 
 ## 平台支持说明
@@ -174,8 +179,8 @@ uv run pytest -q
 |---|---|---|
 | 命令解析、文本/图片/@/引用 | Alconna + `UniMessage`（UniSeg） | **泛平台**（任何已支持适配器） |
 | 跨群发送 | `UniMessage.send(Target.group(...))` | **泛平台** |
-| 禁言 / 解除禁言 / 全员禁言 | `bot.set_group_ban` / `set_group_whole_ban` | OneBot V11 |
-| 撤回消息 | `bot.delete_msg` | OneBot V11 |
+| 禁言 / 解除禁言 / 全员禁言 | 原生 `on_message` + `bot.set_group_ban` / `set_group_whole_ban` | OneBot V11 |
+| 撤回消息 | 原生 `on_message` + `bot.delete_msg` | OneBot V11 |
 | 入群审批（自动/手动） | `GroupRequestEvent.approve()` / `set_group_add_request` | OneBot V11 |
 
 泛平台消息层已就绪；如需接入其它平台，只需在 `utils/messenger.py` 与相关子插件中
@@ -194,6 +199,7 @@ uv run pytest -q
 | `ctx.scene.into(f"::group({g})").send_message(x)` | `UniMessage(x).send(Target.group(str(g), ...))` |
 | `Picture(RawResource(b))` | `UniMessage.image(raw=b)` |
 | `MuteCapability` / `RequestCapability` | `bot.set_group_ban` / `event.approve()` |
+| 原生命令（`on_command` 语义） | `on_message(rule=native_command_rule(...))`（基于 `get_plaintext`，兼容 `&` 前缀）+ `extract_command_args` |
 | `S_ = Setting(**yaml.safe_load(...))` | `S_ = get_plugin_config(Setting)`（值来自 `.env`）+ `C_`（列表值来自 `config.yml`） |
 
 原版 `log_file.py`（实验性）以占位形式保留为 `commspt_log_file.py`。

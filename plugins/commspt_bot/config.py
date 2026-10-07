@@ -17,6 +17,7 @@
     DB_MONGO__URL=mongodb://...
     API_BINGLING_IPIP__ENDPOINT=https://...
     API_BROWSERLESS__ENDPOINT=https://...
+    BROWSERLESS_MODE=REMOTE
     API_LITTLESKIN_ORIGIN__ENDPOINT=https://littleskin.cn
     API_CLOUDCONFIG={"endpoint": "...", "username": "...", "password": "..."}
     LITTLESKIN_ADMIN_TOKEN=...
@@ -55,6 +56,7 @@
 import os
 import ssl
 from pathlib import Path
+from typing import Literal
 
 import truststore
 import yaml
@@ -132,6 +134,10 @@ class Setting(BaseModel):
     api_browserless: API_browserless = API_browserless()
     api_littleskin_origin: API_littleskin_origin = API_littleskin_origin()
     api_cloudconfig: API_cloudconfig = API_cloudconfig()
+
+    # 无头浏览器渲染模式：REMOTE=调用远程 Browserless 服务；LOCAL=使用本地 Playwright 渲染
+    # 环境变量 BROWSERLESS_MODE（LOCAL 需安装可选依赖 render-local 并执行 playwright install chromium）
+    browserless_mode: Literal["REMOTE", "LOCAL"] = "REMOTE"
 
     littleskin_admin_token: str = ""
 

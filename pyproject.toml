@@ -21,6 +21,11 @@ dependencies = [
     "truststore>=0.10.4",
 ]
 
+[project.optional-dependencies]
+# 本地 Playwright 渲染后端（BROWSERLESS_MODE=LOCAL）
+# 安装：uv sync --extra render-local && uv run playwright install chromium
+render-local = ["playwright>=1.40"]
+
 [tool.nonebot]
 plugin_dirs = ["plugins"]
 builtin_plugins = []
@@ -50,7 +55,9 @@ target-version = "py312"
 # 与原项目 commspt-bot-avilla 保持一致的忽略项：
 # BLE001 保留原有宽泛 except（业务上用于兜底外部 API 调用）
 # PERF102 保留原项目的 dict 迭代写法
+# B008 NoneBot 依赖注入惯用法：CommandArg() / RegexDict() 必须作为参数默认值出现
 ignore = [
     "BLE001",
     "PERF102",
+    "B008",
 ]

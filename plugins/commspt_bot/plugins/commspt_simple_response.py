@@ -29,6 +29,7 @@ from plugins.commspt_bot.models.simple_response import (
 )
 from plugins.commspt_bot.utils.adv_filter import admin_only, in_preset_cafe
 from plugins.commspt_bot.utils.command_prefix import display_command, strip_command_prefix
+from plugins.commspt_bot.utils.onebot_message import NATIVE_COMMANDS
 from plugins.commspt_bot.utils.random_sleep import random_sleep
 
 
@@ -95,8 +96,13 @@ def _build_message(entry: SimpleResponse) -> UniMessage:
 # Collision scan helper
 # ---------------------------------------------------------------------------
 def _registered_command_paths() -> set[str]:
-    """扫描所有已注册的 AlconnaMatcher，收集其命令路径（不含 ``Alconna::`` 前缀）。"""
-    paths: set[str] = set()
+    """扫描所有已注册的 matcher，收集命令名（不含 ``Alconna::`` 前缀）。
+
+    - ``AlconnaMatcher``：使用 ``_command_path``
+    - 原生命令：取 ``NATIVE_COMMANDS``（由 ``native_command_rule`` 登记），
+      使静态问答 JSON 键名不会与原生命令冲突（例如 mute）。
+    """
+    paths: set[str] = set(NATIVE_COMMANDS)
     for _prio, ms in matchers.items():
         for m in ms:
             if issubclass(m, AlconnaMatcher):

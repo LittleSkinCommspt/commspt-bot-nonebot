@@ -16,9 +16,11 @@ from nonebot.adapters.onebot.v11 import (
     Bot,
     GroupIncreaseNoticeEvent,
     GroupRequestEvent,
+    Message,
+    MessageSegment,
 )
 from nonebot.rule import Rule
-from nonebot_plugin_alconna.uniseg import At, UniMessage
+from nonebot_plugin_alconna.uniseg import UniMessage
 
 from plugins.commspt_bot.config import JOIN_ANNOUNCEMENT_FILE, S_
 from plugins.commspt_bot.models.cloudconfig import CloudConfig
@@ -208,7 +210,7 @@ async def _(bot: Bot, event: GroupIncreaseNoticeEvent):
     if event.user_id == int(bot.self_id):
         return  # 机器人自己入群，不处理
 
-    welcome_msg = UniMessage(At("user", str(event.user_id))) + " "
+    welcome_msg = Message() + MessageSegment.at(event.user_id) + " "
     nofi_msg = [f"用户已入群 > {event.user_id}"]
 
     uid_mapping = await UIDMapping.fetch(qq=event.user_id)  # 查询新成员已绑定的 UID 信息

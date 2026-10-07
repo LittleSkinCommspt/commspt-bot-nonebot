@@ -224,12 +224,11 @@ async def _(bot: Bot, event: GroupIncreaseNoticeEvent):
         nofi_msg.append(f"UID: {uid_mapping.uid}")
 
     # add join announcement
-    join_announcement = ""
-    if JOIN_ANNOUNCEMENT_FILE.exists():
-        join_announcement = JOIN_ANNOUNCEMENT_FILE.read_text(encoding="UTF-8")
-    else:
-        logger.warning(f"未找到入群公告文件: {JOIN_ANNOUNCEMENT_FILE}")
 
+    # default annoucement text
+    join_announcement = "欢迎来到 LittleSkin 问题反馈群！请首先阅读置顶公告。此群禁止讨论除 LittleSkin 以外的内容。\n你还可以选择加入 Honoka Café 和我们一起聊天！群号：651672723。"
+
+    # try to fetch annoucement text from cloudconfig to override the default text
     try:
         cloudconfig = await CloudConfig.fetch()
         if cloudconfig.enable_temporary_welcome_message_main:

@@ -29,6 +29,7 @@ from plugins.commspt_bot.models.mongodb_data import UIDMapping
 from plugins.commspt_bot.models.render_user_info import RenderUserInfo
 from plugins.commspt_bot.utils.join_request_notice import format_join_request_notice
 from plugins.commspt_bot.utils.messenger import send_to_group as _send_to_group
+from plugins.commspt_bot.utils.qq_profile import get_qq_nickname
 from plugins.commspt_bot.utils.random_sleep import random_sleep
 
 
@@ -129,7 +130,9 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
 
     image: bytes | None = None
     if ltsk_user := await LittleSkinUser.uid_info(answer):  # 查询并渲染用户信息卡片，辅助管理员人工审核
-        render = RenderUserInfo(**ltsk_user.model_dump(), qq=int(applicant))
+        render = RenderUserInfo(
+            **ltsk_user.model_dump(), qq=int(applicant), qq_nickname=await get_qq_nickname(bot, applicant)
+        )
         image = await render.get_image()
     else:
         message.append("👀 未获取到 UID 信息，无法渲染图片")
@@ -271,7 +274,9 @@ async def _(bot: Bot, event: GroupIncreaseNoticeEvent):
                 nofi_msg.append("❌ 账号被封禁")
 
             # render image
-            render = RenderUserInfo(**ltsk_user.model_dump(), qq=event.user_id)
+            render = RenderUserInfo(
+                **ltsk_user.model_dump(), qq=event.user_id, qq_nickname=await get_qq_nickname(bot, event.user_id)
+            )
             image = await render.get_image()
         else:
             # UID not exists

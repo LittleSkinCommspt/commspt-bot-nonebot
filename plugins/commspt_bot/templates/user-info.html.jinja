@@ -107,6 +107,17 @@
                     </div>
                 </div>
                 {% endif %}
+                {% if qq_nickname %}
+                <div class="field">
+                    <label class="label">QQ 昵称</label>
+                    <div class="control has-icons-left">
+                        <input class="input" type="text" value="{{ qq_nickname }}" />
+                        <span class="icon is-small is-left">
+                            <i class="fa-solid fa-signature"></i>
+                        </span>
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </div>
         {% endif %}

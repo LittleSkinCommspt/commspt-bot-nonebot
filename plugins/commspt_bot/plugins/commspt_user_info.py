@@ -11,7 +11,7 @@
 
 from arclet.alconna import Alconna, Args, CommandMeta
 from nonebot import logger
-from nonebot.adapters.onebot.v11 import MessageEvent
+from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 from nonebot_plugin_alconna import At, Match, on_alconna
 from nonebot_plugin_alconna.uniseg import UniMessage
 
@@ -24,6 +24,7 @@ from plugins.commspt_bot.utils.adv_filter import (
     in_preset_commspt,
 )
 from plugins.commspt_bot.utils.mongodb_manager import write_uid_db
+from plugins.commspt_bot.utils.qq_profile import get_qq_nickname
 
 user_info = on_alconna(
     Alconna(
@@ -41,7 +42,7 @@ user_info = on_alconna(
 
 
 @user_info.handle()
-async def _user_info(uid: Match[int]):
+async def _user_info(bot: Bot, uid: Match[int]):
     """根据 UID 查询 LittleSkin 用户信息及 QQ 绑定记录，渲染卡片图片并发送。"""
     logger.info(f"Looking for user info uid={uid.result}")
     # 调用 LittleSkin API 获取用户公开信息
@@ -52,8 +53,11 @@ async def _user_info(uid: Match[int]):
     if ltsk_user:
         logger.info(f"Ready to render {uid.result} ↓")
         logger.info(ltsk_user)
+        # 查询绑定 QQ 的全局昵称（失败时为空，卡片自动省略昵称）
+        qq = mapping_qq.qq if mapping_qq else None
+        qq_nickname = await get_qq_nickname(bot, qq) if qq else ""
         # 组装数据，通过 HTML 模板与 Browserless 渲染截图
-        render = RenderUserInfo(**ltsk_user.model_dump(), qq=mapping_qq.qq if mapping_qq else None)
+        render = RenderUserInfo(**ltsk_user.model_dump(), qq=qq, qq_nickname=qq_nickname)
         image = await render.get_image()
         await user_info.send(UniMessage.image(raw=image))
         logger.success("Image sent.")

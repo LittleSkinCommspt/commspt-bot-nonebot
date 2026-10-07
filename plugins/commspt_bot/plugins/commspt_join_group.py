@@ -25,6 +25,7 @@ from plugins.commspt_bot.models.cloudconfig import CloudConfig
 from plugins.commspt_bot.models.littleskin_api import LittleSkinUser
 from plugins.commspt_bot.models.mongodb_data import UIDMapping
 from plugins.commspt_bot.models.render_user_info import RenderUserInfo
+from plugins.commspt_bot.utils.join_request_notice import format_join_request_notice
 from plugins.commspt_bot.utils.messenger import send_to_group as _send_to_group
 from plugins.commspt_bot.utils.random_sleep import random_sleep
 
@@ -58,11 +59,7 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
     answer = req.comment.splitlines()[-1].removeprefix("答案：").strip()  # 从申请留言最后一行提取填写的 UID 答案
     logger.info(f"Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
     message.append(
-        f"""新的入群申请 (Main)
-» 申请人 {applicant}
-» 答案     {answer}
-
-id={req.sub_type}_{req.flag}""",  # 包含 sub_type 与 flag，用于管理员回复 do 命令审批
+        format_join_request_notice("Main", applicant, answer, req.sub_type, req.flag),
     )
 
     try:
@@ -163,11 +160,7 @@ async def _(bot: Bot, event: GroupRequestEvent):
     answer = req.comment.splitlines()[-1].removeprefix("答案：").strip()  # 从申请留言最后一行提取填写的 UID 答案
     logger.info(f"(cafe) Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
     message.append(
-        f"""新的入群申请 (Cafe)
-» 申请人 {applicant}
-» 答案     {answer}
-
-id={req.sub_type}_{req.flag}""",
+        format_join_request_notice("Cafe", applicant, answer, req.sub_type, req.flag),
     )
 
     if not answer.isdecimal():  # UID 应为十进制纯数字

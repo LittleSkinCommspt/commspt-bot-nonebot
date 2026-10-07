@@ -9,16 +9,23 @@
 """
 
 import re
-from typing import Literal
+from typing import Literal, assert_never
 
 from arclet.alconna import Alconna, Args, CommandMeta
 from nonebot import logger
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent
+from nonebot.adapters.onebot.v11 import Bot, MessageEvent, OneBotV11AdapterException
+from nonebot.rule import Rule
 from nonebot_plugin_alconna import Match, on_alconna
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 from plugins.commspt_bot.utils.adv_filter import admin_only, in_preset_cafe
+from plugins.commspt_bot.utils.join_request_notice import JoinRequestNoticeError, parse_join_request_notice
 from plugins.commspt_bot.utils.random_sleep import random_sleep
+
+
+def is_bare_do_action(event: MessageEvent) -> bool:
+    return re.fullmatch(r"do (?:accept|reject(?: \S+)?)", event.raw_message) is not None
+
 
 # region do join action
 do_action = on_alconna(
@@ -33,7 +40,7 @@ do_action = on_alconna(
             example="do accept",
         ),
     ),
-    rule=in_preset_cafe,
+    rule=in_preset_cafe & Rule(is_bare_do_action),
     permission=admin_only,
     use_cmd_start=False,
 )
@@ -49,36 +56,64 @@ async def do_action_join(
     """处理回复加群申请提示的审批指令。"""
     logger.info("received do action (join group request)")
 
-    # check origin message
     if not event.reply:
         await do_action.send(UniMessage("需要回复一条申请提示消息以进行处理"), reply_to=True)
         return
-    origin_raw_text = str(event.reply.message)
-    req_match = re.search(r"^id=(.*)$", origin_raw_text, re.MULTILINE)  # 从被回复的提示消息中提取 id=<sub_type>_<flag>
-    applicant_match = re.search(r"申请人\s*(.*)$", origin_raw_text, re.MULTILINE)  # 从被回复的提示消息中提取申请人 QQ 号
 
-    # if check failed then kill
-    # 仅处理由机器人发出的标准加群申请提示消息
-    if not (origin_raw_text.startswith("新的入群申请") and req_match and applicant_match):
+    try:
+        reply_sender_id = int(event.reply.sender.user_id)
+    except (TypeError, ValueError):
+        await do_action.send(UniMessage("无法验证通知来源"), reply_to=True)
+        return
+    if reply_sender_id != int(bot.self_id):
+        await do_action.send(UniMessage("无法验证通知来源"), reply_to=True)
         return
 
-    reqid = req_match.group(1)
-    applicant = applicant_match.group(1)
-    logger.info(f"do action (join group request): {action.result=}, {reason.result=}, {applicant=}, {reqid=}")
+    try:
+        notice = parse_join_request_notice(str(event.reply.message))
+    except JoinRequestNoticeError:
+        await do_action.send(UniMessage("无法识别申请通知"), reply_to=True)
+        return
 
-    sub_type, flag = reqid.split("_", 1)  # 拆分得到 OneBot V11 加群子类型与请求 flag
-
-    # Fn action
     await random_sleep(3)
-    match action.result:
-        case "accept":
-            await bot.set_group_add_request(flag=flag, sub_type=sub_type, approve=True)  # 调用 OneBot V11 API 同意入群
-            logger.info("accepted")
-        case "reject":
-            # 调用 OneBot V11 API 拒绝入群并附带原因
-            await bot.set_group_add_request(flag=flag, sub_type=sub_type, approve=False, reason=reason.result)
-            logger.info("rejected")
-    await do_action.send(UniMessage(f"{action.result}ed {applicant}"), reply_to=True)
+    try:
+        match action.result:
+            case "accept":
+                await bot.set_group_add_request(flag=notice.flag, sub_type=notice.sub_type, approve=True)
+                logger.info("accepted")
+            case "reject":
+                await bot.set_group_add_request(
+                    flag=notice.flag,
+                    sub_type=notice.sub_type,
+                    approve=False,
+                    reason=reason.result,
+                )
+                logger.info("rejected")
+            case unreachable:
+                assert_never(unreachable)
+    except OneBotV11AdapterException as exception:
+        logger.error(
+            "join moderation action failed: action={action} group={group} subtype={subtype} exception={exception}",
+            action=action.result,
+            group=event.group_id,
+            subtype=notice.sub_type,
+            exception=type(exception).__name__,
+        )
+        await do_action.send(UniMessage("处理失败：请求可能已过期、已处理，或被平台拒绝"), reply_to=True)
+        return
+
+    try:
+        await do_action.send(UniMessage(f"{action.result}ed {notice.applicant}"), reply_to=True)
+    except OneBotV11AdapterException as exception:
+        logger.error(
+            "join moderation action succeeded, notification failed: "
+            "action={action} group={group} subtype={subtype} exception={exception}",
+            action=action.result,
+            group=event.group_id,
+            subtype=notice.sub_type,
+            exception=type(exception).__name__,
+        )
+        return
 
 
 # endregion

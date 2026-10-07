@@ -74,7 +74,7 @@ cp config.yml.example config.yml
 | 配置项 | 说明 |
 |---|---|
 | `COMMAND_START` | 命令前缀（NoneBot 内置），默认 `["&"]` |
-| `ALCONNA_USE_COMMAND_START` | 是否将 `COMMAND_START` 作为 Alconna 全局命令前缀。**库默认值为 `false`**；本项目在 `.env.example` 中设为 `true`，且**必须为 `true`**，否则配置的前缀不会应用到 Alconna 命令（含静态问答分发器的前缀识别）。 |
+| `ALCONNA_USE_COMMAND_START` | 是否将 `COMMAND_START` 作为 Alconna 全局命令前缀。**库默认值为 `false`**；本项目在 `.env.example` 中设为 `true`，且**必须为 `true`**，否则配置的前缀不会应用到一般 Alconna 命令（含静态问答分发器的前缀识别）。入群审批 `do` 命令是局部例外：matcher 使用 `use_cmd_start=False`，并以原始消息守卫强制仅接受无前缀形式。 |
 | `DEFINED_QQ__LITTLESKIN_MAIN` / `__LITTLESKIN_CAFE` | 主群 / 水群群号 |
 | `DEFINED_QQ__COMMSPT_GROUP` | 社区支持组群号 |
 | `DEFINED_QQ__NOTIFICATION_CHANNEL` | 通知群号（入群欢迎通知） |
@@ -87,6 +87,8 @@ cp config.yml.example config.yml
 | `API_CLOUDCONFIG` | 云控配置（JSON 对象） |
 | `COMMSPT_SIMPLE_RESPONSE_FILE` | 简易问答内容 JSON 文件路径（默认项目根目录 `commspt_simple_response.json`） |
 | `COMMSPT_ASSETS_DIR` | 静态资源目录（默认项目根目录 `assets/`） |
+
+入群审批 `do` 命令只接受裸命令 `do accept` 或 `do reject [单个不含空白的原因词]`。带全局前缀的 `&do`（例如 `&do accept`）会被 matcher 局部的原始输入守卫明确拒绝，多词拒绝原因也不会匹配。
 
 ### 3. 运行
 
@@ -101,7 +103,7 @@ uv run python -m nonebot ...     # 由 nb-cli 生成启动脚本
 uv run pytest -q
 ```
 
-包含 87 个测试：插件加载、21 个 Alconna 命令 + 1 个静态问答分发器（服务 commspt_simple_response.json 中的全部问答命令）的注册、命令参数解析（`Match` / `At` / 默认值 / 别名）、
+测试覆盖插件加载、21 个 Alconna 命令 + 1 个静态问答分发器（服务 commspt_simple_response.json 中的全部问答命令）的注册、命令参数解析（`Match` / `At` / 默认值 / 别名）、
 群白名单、管理员权限、业务逻辑直连测试（禁言 / 撤回 / 全员禁言的 API 调用参数），
 以及简易问答 JSON 加载测试（`tests/test_simple_response.py`，覆盖默认路径、环境变量覆盖、文件缺失、schema 校验、有序 `messages` 片段构建等场景）。
 

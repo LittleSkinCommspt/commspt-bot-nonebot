@@ -1,17 +1,17 @@
 # commspt-bot-nonebot
 
-LittleSkin 社区支持 QQ 机器人 —— **NoneBot2（OneBot V11 + Alconna）** 实现，由 [commspt-bot-avilla](https://github.com/LittleSkinCommspt/commspt-bot-avilla)（Avilla 版）移植而来。
+LittleSkin Community Support QQ bot
 
-## 特性
+LittleSkin 的社区支持 QQ 机器人，主要基于 [nonebot/nonebot2](https://github.com/nonebot/nonebot2) 框架。
 
-- **Alconna 命令规范**：泛平台命令使用 [Arclet Alconna](https://github.com/ArcletProject/Alconna) 声明式定义，参数强类型校验、自动帮助输出
-- **原生 OneBot V11 群管命令**：禁言 / 撤回 / 入群审批等协议相关命令改用 NoneBot 原生 matcher + OneBot V11 消息段交互，不依赖 Alconna / UniMessage
+## 新增/优化的特性
+
+- [简易问答内容配置](#simple-response-content)
 - **泛平台消息层**：消息收发、图片、@ 均基于 `UniMessage`（UniSeg），命令解析跨平台通用
-- **协议相关动作**：禁言、撤回、入群审批等基于 OneBot V11 API（见下文说明）
 - **双后端出图**：`BROWSERLESS_MODE` 可在远程 Browserless 服务与本地 Playwright 渲染间切换
 
 ## 目录结构
-
+*此结构可以表达大部分框架原理，但可能不是实时更新*
 ```
 assets/                               # 图片与字体（可通过 COMMSPT_ASSETS_DIR 覆盖）
 plugins/commspt_bot/              # 父插件（共享层）
@@ -111,6 +111,8 @@ uv run pytest -q
 原生命令（`&mute` / `&unmute` / `&recall` / `&muteall` / `&unmuteall` / `do`）的规则匹配与参数解析、
 群白名单、管理员权限、业务逻辑直连测试（禁言 / 撤回 / 全员禁言的 API 调用参数），
 以及简易问答 JSON 加载测试（`tests/test_simple_response.py`，覆盖默认路径、环境变量覆盖、文件缺失、schema 校验、有序 `messages` 片段构建等场景）。
+
+<a id="simple-response-content"></a>
 
 ## 简易问答内容配置（开发者）
 

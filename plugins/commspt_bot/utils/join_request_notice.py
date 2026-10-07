@@ -19,11 +19,14 @@ class JoinRequestNoticeError(ValueError):
     pass
 
 
+# 末尾边界断言 (?=[\r\n]|$) 确保 flag 后为行尾/串尾，仍拒绝 id=add_flag_extra 之类的粘连。
+# 解析使用 search 以容忍生产者拼在通知前后的提示行与图片 CQ 段。
 _NOTICE_PATTERN = re.compile(
     r"新的入群申请 \((?P<kind>Main|Cafe)\)\n"
     r"» 申请人 (?P<applicant>[0-9]+)\n"
     r"» 答案     (?P<answer>[^\r\n]+)\n"
-    r"\nid=(?P<sub_type>add|invite)_(?P<flag>[^\s_\x00-\x1f\x7f]+)",
+    r"\nid=(?P<sub_type>add|invite)_(?P<flag>[^\s_\x00-\x1f\x7f]+)"
+    r"(?=[\r\n]|$)",
 )
 
 
@@ -44,7 +47,7 @@ def format_join_request_notice(
 
 
 def parse_join_request_notice(message: str) -> JoinRequestNotice:
-    match = _NOTICE_PATTERN.fullmatch(message)
+    match = _NOTICE_PATTERN.search(message)
     if match is None:
         raise JoinRequestNoticeError("Message does not match a complete join-request notice")
     fields = match.groupdict()

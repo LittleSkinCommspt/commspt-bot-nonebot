@@ -19,6 +19,7 @@ dependencies = [
     "pytz>=2024.1",
     "email-validator>=2.1.0.post1",
     "truststore>=0.10.4",
+    "nb-cli>=1.7.4",
 ]
 
 [project.optional-dependencies]

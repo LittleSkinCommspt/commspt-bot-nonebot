@@ -95,47 +95,67 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
 
     uid = int(answer)
 
-    # qmail api verification
-    if (ltsk_qmail := await LittleSkinUser.qmail_api(applicant)) and ltsk_qmail.uid == uid:
-        # ok: pass verification
-        await UIDMapping(uid=uid, qq=applicant, qmail_verified=True).update()  # 记录/更新 QQ 与 UID 映射及验证状态
-        logger.success(
-            f"(main) Member Join Request Event {req.sub_type} was accepted. (QMAIL PASS) {applicant} > {answer}",
-        )
+    image: bytes | None = None
+    qmail_passed = False
+    uid_not_exists = False
+    api_error = False
+    try:
+        # qmail api verification
+        ltsk_qmail = await LittleSkinUser.qmail_api(applicant)
+        if ltsk_qmail and ltsk_qmail.uid == uid:
+            # ok: pass verification
+            await UIDMapping(uid=uid, qq=applicant, qmail_verified=True).update()  # 记录/更新 QQ 与 UID 映射及验证状态
+            logger.success(
+                f"(main) Member Join Request Event {req.sub_type} was accepted. (QMAIL PASS) {applicant} > {answer}",
+            )
+            qmail_passed = True
+        elif not await LittleSkinUser.uid_info(uid):  # 校验所填 UID 是否在 LittleSkin 平台存在
+            # failed: uid not exists
+            logger.warning(
+                f"(main) Member Join Request Event {req.sub_type} was ignored. (UID NOT EXISTS) {applicant} > {answer}",
+            )
+            message.append("👀 这个 UID 根本不存在，需手动处理")
+            uid_not_exists = True
+        else:
+            if email_uid := await LittleSkinUser.qmail_api(qq=applicant):  # 若申请人 QQ 邮箱曾绑定过其他 UID 则提示可能正确的 UID
+                message.append(f"ⓘ 可能才为正确对应的 UID: {email_uid.uid}")
 
+            # failed: not pass verification
+            logger.warning(
+                f"(main) Member Join Request Event {req.sub_type} was ignored. (GENERAL) {applicant} > {answer}",
+            )
+            await UIDMapping(uid=uid, qq=applicant).update()
+            message.append("👀 请手动处理")
+
+            if ltsk_user := await LittleSkinUser.uid_info(answer):  # 查询并渲染用户信息卡片，辅助管理员人工审核
+                render = RenderUserInfo(
+                    **ltsk_user.model_dump(), qq=int(applicant), qq_nickname=await get_qq_nickname(bot, applicant)
+                )
+                image = await render.get_image()
+            else:
+                message.append("👀 未获取到 UID 信息，无法渲染图片")
+    except Exception as e:
+        # 主站或映射数据库不可用时降级：仍发送申请通知，交由管理员手动处理
+        logger.exception(e)
+        message.append("⚠️ 主站/映射数据库服务请求失败，需手动处理")
+        image = None
+        api_error = True
+
+    if qmail_passed:
         await random_sleep(3)  # sleep before action
         await req.approve(bot)  # 校验通过，调用 API 同意入群
-        message.append("👆 已同意 [QMAIL API passed]")
         return
 
-    # lstk uid check
-    if not await LittleSkinUser.uid_info(uid):  # 校验所填 UID 是否在 LittleSkin 平台存在
-        # failed: uid not exists
-        logger.warning(
-            f"(main) Member Join Request Event {req.sub_type} was ignored. (UID NOT EXISTS) {applicant} > {answer}",
-        )
-        message.append("👀 这个 UID 根本不存在，需手动处理")
-        await random_sleep(3)  # sleep before action
+    if api_error:
+        # 请求失败仍需向群聊发送加群申请通知，方便管理员交互处理
+        await random_sleep(4)  # sleep before action
         await _send_to_group(S_.defined_qq.commspt_group, "\n\n".join(m for m in message if m))
         return
 
-    if email_uid := await LittleSkinUser.qmail_api(qq=applicant):  # 若申请人 QQ 邮箱曾绑定过其他 UID 则提示可能正确的 UID
-        may_current_uid = email_uid.uid
-        message.append(f"ⓘ 可能才为正确对应的 UID: {may_current_uid}")
-
-    # failed: not pass verification
-    logger.warning(f"(main) Member Join Request Event {req.sub_type} was ignored. (GENERAL) {applicant} > {answer}")
-    await UIDMapping(uid=uid, qq=applicant).update()
-    message.append("👀 请手动处理")
-
-    image: bytes | None = None
-    if ltsk_user := await LittleSkinUser.uid_info(answer):  # 查询并渲染用户信息卡片，辅助管理员人工审核
-        render = RenderUserInfo(
-            **ltsk_user.model_dump(), qq=int(applicant), qq_nickname=await get_qq_nickname(bot, applicant)
-        )
-        image = await render.get_image()
-    else:
-        message.append("👀 未获取到 UID 信息，无法渲染图片")
+    if uid_not_exists:
+        await random_sleep(3)  # sleep before action
+        await _send_to_group(S_.defined_qq.commspt_group, "\n\n".join(m for m in message if m))
+        return
 
     await random_sleep(4)  # sleep before action
     noti = UniMessage()
@@ -155,7 +175,7 @@ cafe_join_request = on_request(
 
 
 @cafe_join_request.handle()
-async def _(bot: Bot, event: GroupRequestEvent):
+async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
     req = event
     applicant = req.user_id
     message: list[str] = []
@@ -173,6 +193,8 @@ async def _(bot: Bot, event: GroupRequestEvent):
             f"(cafe) Member Join Request Event {req.sub_type} was ignored. (ANSWER NOT DECIMAL) {applicant} > {answer}",
         )
         message.append("👀 答案不是纯数字，需手动处理")
+        # 即便无法自动处理，也需向群聊发送申请通知，方便管理员交互处理
+        await _send_to_group(S_.defined_qq.littleskin_cafe, "\n\n".join(m for m in message if m))
         return
 
     uid = int(answer)
@@ -181,7 +203,16 @@ async def _(bot: Bot, event: GroupRequestEvent):
     await random_sleep(3)
 
     # lstk uid check
-    if not await LittleSkinUser.uid_info(uid):
+    try:
+        uid_exists = await LittleSkinUser.uid_info(uid)
+    except Exception as e:
+        # 主站不可用时降级：仍发送申请通知，交由管理员手动处理
+        logger.exception(e)
+        message.append("⚠️ 需手动处理")
+        await _send_to_group(S_.defined_qq.littleskin_cafe, "\n\n".join(m for m in message if m))
+        return
+
+    if not uid_exists:
         # failed: uid not exists
         logger.warning(
             f"(cafe) Member Join Request Event {req.sub_type} was ignored. (UID NOT EXISTS) {applicant} > {answer}",
@@ -191,10 +222,24 @@ async def _(bot: Bot, event: GroupRequestEvent):
         return
 
     # general: approve
-    mapping_uid = await UIDMapping.fetch(qq=applicant)
-    status = "✅" if (mapping_uid and mapping_uid.uid == uid) else "⚠️"  # 检查是否与主群记录的 UID 映射一致
+    mapping_failed = False
+    try:
+        mapping_uid = await UIDMapping.fetch(qq=applicant)
+        status = "✅" if (mapping_uid and mapping_uid.uid == uid) else "⚠️"  # 检查是否与主群记录的 UID 映射一致
+    except Exception as e:
+        # 映射数据库不可用不影响审批，仅标记为未知并提示手动核对
+        logger.exception(e)
+        status = "⚠️"
+        mapping_failed = True
+        message.append("⚠️ 需手动处理")
+
     await req.approve(bot)  # 茶馆群只要 UID 存在即自动同意入群
-    await _send_to_group(S_.defined_qq.littleskin_cafe, f"(RESULT) Mapping {status}: QQ {applicant} -> UID {uid}")
+    if mapping_failed:
+        # 映射查询失败时附上申请通知，方便管理员核对处理
+        message.append(f"(RESULT) Mapping {status}: QQ {applicant} -> UID {uid}")
+        await _send_to_group(S_.defined_qq.littleskin_cafe, "\n\n".join(m for m in message if m))
+    else:
+        await _send_to_group(S_.defined_qq.littleskin_cafe, f"(RESULT) Mapping {status}: QQ {applicant} -> UID {uid}")
 
 
 # endregion

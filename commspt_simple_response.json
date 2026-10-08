@@ -59,5 +59,16 @@
   },
   "copyright": {
     "text": "「版权申诉」\n请准备可以证明材质所有者的相关资料，以便进行申诉。\n相关资料如：\n- 材质的工程文件 / 约稿记录\n- 在其他平台的材质发布帖 / 创作动态\n- ... 等\n\n并准备好您的 UID，您的 QQ 号，需申诉材质的 TID（如需要申诉多个材质，可使用 txt 文件，一行一个材质链接，附在 zip 内） 等信息。\n\n请将这些文件统一使用 zip 格式打包，并使用您在 LittleSkin 绑定的邮箱，通过 邮件附件 的方式发送至 support@littlesk.in 以进行申诉。我们一般会在 7 个工作日内处理您的请求。"
+  },
+  "set_ygg": {
+    "images": [
+      "images/pcl_setygg.gif"
+    ],
+    "text": "「PCL外置登录手动设置如图」\n----\n「我们目前更推荐使用对外置登录以及多账号功能适配性更好的HMCL启动器」\nhttps://hmcl.huangyuhui.net/download/"
+  },
+  "idk_password": {
+    "images": [
+      "images/forgot_password.png"
+    ]
   }
 }

@@ -38,6 +38,7 @@ plugins/commspt_bot/              # 父插件（共享层）
 └── plugins/                      # 13 个子插件（每个功能一个）
     ├── commspt_simple_response.py    # 单一 on_message 分发器，服务 commspt_simple_response.json 中的全部静态问答命令；管理员 &sreload 可在运行时热重载
     ├── commspt_profile.py            # &ygg / &pro 玩家查询
+    ├── commspt_cao.py                # 生草复读机
     ├── commspt_view_skin.py          # &view / &view.ygg / %view.pro 皮肤渲染
     ├── commspt_profile_check.py      # &check 玩家体检
     ├── commspt_user_info.py          # &user / &setuid 用户信息卡

@@ -70,5 +70,8 @@
     "images": [
       "images/forgot_password.png"
     ]
+  },
+  "start": {
+    "text": "「请提供以下基础信息以帮助您更快解决问题」\n1.游戏内使用的角色名(❗必填)\n2.是否安装了CustomSkinLoader模组(❗必填)\n3.游戏版本\n4.游玩单人还是多人模式\n5.游戏内角色截图\n------\n如已安装CustomSkinLoader，请发送CustomSkinLoader的日志（.minecraft/CustomSkinLoader/CustomSkinLoader.log）\n如果您没能提供以上信息，可能会导致无法获得帮助。"
   }
 }

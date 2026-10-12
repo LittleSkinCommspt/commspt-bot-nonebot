@@ -27,6 +27,11 @@ from plugins.commspt_bot.config import S_, TEMPLATE_DIR, VERIFY_CONTENT
 _LAUNCH_LOCK = asyncio.Lock()
 _playwright = None
 _browser = None
+_FONT_TIMEOUT_SECONDS = 10
+_FONTS_READY = (
+    "async () => { await document.fonts.ready; "
+    "await new Promise(resolve => requestAnimationFrame(resolve)); return true; }"
+)
 
 
 async def _ensure_browser():
@@ -78,6 +83,8 @@ async def _screenshot_local(
         page = await context.new_page()
         # 等待网络空闲（networkidle）确保静态资源加载完成，再按视口截图
         await page.set_content(html, wait_until="networkidle")
+        # 字体就绪后再等待一次布局绘制，避免中文/数字在截图时仍使用临时回退字体。
+        await asyncio.wait_for(page.evaluate(_FONTS_READY), timeout=_FONT_TIMEOUT_SECONDS)
         return await page.screenshot(type="png", full_page=full_page)
     finally:
         await context.close()
@@ -123,6 +130,7 @@ async def _screenshot_remote(
                 # 请求头配置与页面加载策略：设置中文语言偏好，并等待网络连接空闲（networkidle0）确保静态资源加载完成
                 "setExtraHTTPHeaders": {"Accept-Language": "zh-CN,en;q=0.9"},
                 "gotoOptions": {"waitUntil": ["networkidle0"]},
+                "waitForFunction": {"fn": _FONTS_READY, "timeout": _FONT_TIMEOUT_SECONDS * 1000},
             },
         )
         # raise exception if status is bad

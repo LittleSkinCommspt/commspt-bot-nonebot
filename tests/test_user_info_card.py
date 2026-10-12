@@ -1,5 +1,6 @@
 """用户档案状态、内容转义以及两种截图后端的完整页面契约。"""
 
+import asyncio
 import importlib.util
 import sys
 from datetime import datetime
@@ -92,6 +93,24 @@ def test_dark_theme_uses_existing_user_preference(template, user_data):
     assert 'data-theme="dark"' in template.render(user_data)
 
 
+def test_dates_have_separate_date_and_clock_rows(template, user_data):
+    html = template.render(user_data)
+    assert 'datetime="2024-02-09T14:23:11"><span>2024-02-09</span><span class="clock">14:23:11</span>' in html
+    assert 'datetime="2026-10-12T19:47:26"><span>2026-10-12</span><span class="clock">19:47:26</span>' in html
+
+
+def test_email_alone_does_not_imply_qq_binding(template, user_data):
+    user_data.update(qq=None, email="123456789@qq.com")
+    html = template.render(user_data)
+    assert 'class="qq-grid"' not in html
+
+
+def test_shield_only_appears_for_banned_accounts(template, user_data):
+    assert 'class="ban-icon"' not in template.render(user_data)
+    user_data["permission"] = -1
+    assert 'class="ban-icon"' in template.render(user_data)
+
+
 def load_isolated_module(monkeypatch, name, path):
     spec = importlib.util.spec_from_file_location(name, ROOT / path)
     module = importlib.util.module_from_spec(spec)
@@ -119,12 +138,46 @@ def renderer(monkeypatch):
 
 @pytest.mark.parametrize("full_page", [False, True])
 async def test_local_backend_forwards_full_page_and_closes_context(renderer, monkeypatch, full_page):
-    page = SimpleNamespace(set_content=AsyncMock(), screenshot=AsyncMock(return_value=b"png"))
+    events = []
+
+    async def wait_for_fonts(*args):
+        events.append("fonts")
+
+    async def capture(*args, **kwargs):
+        events.append("capture")
+        return b"png"
+
+    page = SimpleNamespace(
+        set_content=AsyncMock(),
+        evaluate=AsyncMock(side_effect=wait_for_fonts),
+        screenshot=AsyncMock(side_effect=capture),
+    )
     context = SimpleNamespace(new_page=AsyncMock(return_value=page), close=AsyncMock())
     browser = SimpleNamespace(new_context=AsyncMock(return_value=context))
     monkeypatch.setattr(renderer, "_ensure_browser", AsyncMock(return_value=browser))
     assert await renderer._screenshot_local("<html></html>", 530, 1, True, 2.5, full_page) == b"png"
     page.screenshot.assert_awaited_once_with(type="png", full_page=full_page)
+    page.evaluate.assert_awaited_once_with(renderer._FONTS_READY)
+    assert events == ["fonts", "capture"]
+    context.close.assert_awaited_once()
+
+
+async def test_font_timeout_prevents_capture_and_closes_context(renderer, monkeypatch):
+    async def pending_fonts(*args):
+        await asyncio.Event().wait()
+
+    page = SimpleNamespace(
+        set_content=AsyncMock(),
+        evaluate=AsyncMock(side_effect=pending_fonts),
+        screenshot=AsyncMock(return_value=b"png"),
+    )
+    context = SimpleNamespace(new_page=AsyncMock(return_value=page), close=AsyncMock())
+    browser = SimpleNamespace(new_context=AsyncMock(return_value=context))
+    monkeypatch.setattr(renderer, "_ensure_browser", AsyncMock(return_value=browser))
+    monkeypatch.setattr(renderer, "_FONT_TIMEOUT_SECONDS", 0.01)
+    with pytest.raises(TimeoutError):
+        await renderer._screenshot_local("<html></html>", 530, 1, True, 2.5, True)
+    page.screenshot.assert_not_awaited()
     context.close.assert_awaited_once()
 
 
@@ -147,6 +200,7 @@ async def test_remote_backend_forwards_full_page(renderer, monkeypatch, full_pag
     payload = clients[0].post.await_args.kwargs["json"]
     assert payload["options"] == {"type": "png", "fullPage": full_page}
     assert payload["viewport"]["height"] == 1
+    assert payload["waitForFunction"] == {"fn": renderer._FONTS_READY, "timeout": 10000}
 
 
 @pytest.mark.parametrize("mode", ["LOCAL", "REMOTE"])
@@ -185,8 +239,11 @@ async def test_user_card_requests_full_content_and_keeps_dark_mode(renderer, mon
     monkeypatch.setattr(model, "screenshot", screenshot)
     data = dict(user_data, ip=["127.0.0.1"], is_dark_mode=True)
     for field in ("generated_at", "register_at", "last_sign_at"):
-        data[field] = datetime.fromisoformat(data[field])
+        data[field] = datetime.fromisoformat(data[field] + "+08:00")
     assert await model.RenderUserInfo(**data).get_image() == b"png"
     assert screenshot.await_args.kwargs["height"] == 1
     assert screenshot.await_args.kwargs["full_page"] is True
     assert screenshot.await_args.kwargs["is_dark_mode"] is True
+    assert screenshot.await_args.kwargs["register_at"] == "2024-02-09 14:23:11"
+    assert screenshot.await_args.kwargs["last_sign_at"] == "2026-10-12 19:47:26"
+    assert screenshot.await_args.kwargs["generated_at"] == "2026-10-12 20:00:00"

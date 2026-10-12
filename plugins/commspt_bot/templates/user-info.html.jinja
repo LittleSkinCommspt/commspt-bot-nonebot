@@ -38,7 +38,7 @@
         * { box-sizing: border-box; }
         body {
             margin: 0;
-            padding: 16px;
+            padding: 0;
             background: var(--soft);
             color: var(--ink);
             font: 400 16px/1.65 "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -49,6 +49,8 @@
             font-variant-numeric: tabular-nums;
             overflow-wrap: anywhere;
         }
+        .timestamp { display: block; }
+        .timestamp span { display: block; }
         .record {
             width: 100%;
             max-width: 530px;
@@ -99,7 +101,8 @@
             background: var(--red-bg);
             color: var(--red);
         }
-        .ban-heading { font-size: 15px; font-weight: 600; }
+        .ban-heading { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+        .ban-icon { flex: none; width: 18px; height: 18px; }
         .ban-label { display: block; margin: 8px 0 4px; font-size: 12px; }
         .ban-reason { font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
         .details { padding: 0 26px 24px; }
@@ -109,14 +112,14 @@
         .email-value { font-size: 18px; overflow-wrap: anywhere; }
         .email.is-unverified .badge { background: var(--amber-bg); color: var(--amber); }
         .email-help { margin-top: 6px; font-size: 12px; color: var(--amber); overflow-wrap: anywhere; }
-        .qq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+        .qq-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
         .qq-note { margin-top: 4px; font-size: 11px; color: var(--green); }
-        .account-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 16px; margin-top: 20px; }
+        .account-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px 16px; margin-top: 20px; }
+        .qq-grid > div, .account-grid > div { min-width: 0; }
         dt { font-size: 12px; color: var(--muted); }
         dd { margin-top: 4px; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
         .footer { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 14px 26px; border-top: 1px solid var(--line); background: var(--soft); color: var(--muted); font-size: 11px; }
         @media (max-width: 440px) {
-            body { padding: 12px; }
             .header, .identity { padding: 20px; }
             .details { padding: 0 20px 20px; }
             h1 { font-size: 23px; }
@@ -129,6 +132,10 @@
     </style>
 </head>
 <body>
+    {% macro timestamp(value) -%}
+    {% set parts = value.split(' ', 1) %}
+    <time class="timestamp mono" datetime="{{ value | replace(' ', 'T') }}"><span>{{ parts[0] }}</span>{% if parts | length > 1 %}<span class="clock">{{ parts[1] }}</span>{% endif %}</time>
+    {%- endmacro %}
     {% set banned = permission == -1 %}
     <article class="record{% if banned %} is-banned{% endif %}" aria-label="LittleSkin 用户档案">
         <header class="header">
@@ -142,7 +149,7 @@
             </div>
             {% if banned %}
             <section class="ban-notice" aria-label="账户封禁提醒">
-                <h2 class="ban-heading">账户已封禁</h2>
+                <h2 class="ban-heading"><svg class="ban-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 7v6c0 4 4 7 8 9 4-2 8-5 8-9V7Z"/><path d="M12 8v5"/><circle cx="12" cy="17" r=".75" fill="currentColor" stroke="none"/></svg>账户已封禁</h2>
                 <span class="ban-label">封禁原因</span>
                 <p class="ban-reason">{{ (ban_reason or '') | trim or '未提供封禁原因' }}</p>
             </section>
@@ -163,8 +170,8 @@
             <dl class="account-grid">
                 <div><dt>积分</dt><dd class="mono">{{ '{:,}'.format(score) }}</dd></div>
                 <div><dt>注册 IP 属地</dt><dd>{{ network or '未获取' }}</dd></div>
-                <div><dt>注册时间</dt><dd class="mono">{{ register_at }}</dd></div>
-                <div><dt>最后签到</dt><dd class="mono">{% if register_at > last_sign_at %}从未签到过{% else %}{{ last_sign_at }}{% endif %}</dd></div>
+                <div><dt>注册时间</dt><dd>{{ timestamp(register_at) }}</dd></div>
+                <div><dt>最后签到</dt><dd>{% if register_at > last_sign_at %}从未签到过{% else %}{{ timestamp(last_sign_at) }}{% endif %}</dd></div>
             </dl>
         </div>
         <footer class="footer"><span>内部支持 · 用户档案</span><span>生成于 <time class="mono">{{ generated_at }}</time></span></footer>

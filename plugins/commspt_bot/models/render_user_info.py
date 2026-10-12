@@ -16,6 +16,7 @@ import arrow
 from pydantic import BaseModel, EmailStr, Field, IPvAnyAddress, computed_field
 from pydantic.functional_serializers import PlainSerializer
 
+from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.bingling_ipip import BingLingIPIP
 from plugins.commspt_bot.utils.browserless import screenshot
 
@@ -25,6 +26,14 @@ HumanReadableTime = Annotated[
     PlainSerializer(lambda t: arrow.get(t).format("YYYY-MM-DD HH:mm:ss")),
     Field(default_factory=datetime.now),
 ]
+
+
+def _is_dark_at(now: datetime) -> bool:
+    """按明确的北京时间窗口判断主题，避免依赖服务器本地时区。"""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("Theme clock must include a timezone")
+    hour = arrow.get(now).to("Asia/Shanghai").hour
+    return not 7 <= hour < 19
 
 
 class RenderUserInfo(BaseModel):
@@ -61,11 +70,14 @@ class RenderUserInfo(BaseModel):
             v.append("⚠️ 含有大写字母 ⚠️ ")
         return " / ".join(v)
 
-    async def get_image(self) -> bytes:
+    async def get_image(self, *, now: datetime | None = None) -> bytes:
         """整合 IP 属地并调用 Browserless 服务渲染用户资料卡片截图。"""
         # 获取 IP 属地信息
         ipip = await BingLingIPIP.get(self.ip[0])
         self.network = f"{ipip.country_name}{ipip.region_name}{ipip.city_name} {ipip.isp_domain}{ipip.owner_domain}"
 
         # 最小视口高度配合完整页面截图，避免长昵称/封禁原因被裁切或留下固定高度空白。
-        return await screenshot("user-info.html.jinja", **self.model_dump(), height=1, full_page=True)
+        params = self.model_dump()
+        if S_.user_card_auto_theme:
+            params["is_dark_mode"] = _is_dark_at(now if now is not None else arrow.utcnow().datetime)
+        return await screenshot("user-info.html.jinja", **params, height=1, full_page=True)

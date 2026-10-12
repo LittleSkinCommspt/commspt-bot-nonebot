@@ -97,6 +97,10 @@ cp config.yml.example config.yml
 
 入群审批 `do` 命令只接受裸命令 `do accept` 或 `do reject [单个不含空白的原因词]`。`do` 使用前缀无关的原生 `on_regex`，因此带全局前缀的 `&do`（例如 `&do accept`）不会匹配，多词拒绝原因也不会匹配。
 
+### 用户信息卡主题
+
+`USER_CARD_AUTO_THEME` 默认开启：按 `Asia/Shanghai` 时区，07:00（含）至 19:00（不含）使用浅色，其余时间使用深色，与服务器本地时区无关。设为 `false` 后，完全恢复被查询账户的 `is_dark_mode` 偏好。该开关只影响用户信息卡，不修改账户数据，也不影响其他图卡。
+
 ### 3. 运行
 
 ```bash

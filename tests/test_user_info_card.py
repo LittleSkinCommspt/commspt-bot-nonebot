@@ -1,15 +1,18 @@
 """用户档案状态、内容转义以及两种截图后端的完整页面契约。"""
 
+import ast
 import asyncio
 import importlib.util
 import sys
 from datetime import datetime
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Literal
 from unittest.mock import AsyncMock
 
 import pytest
 from jinja2 import Environment, FileSystemLoader
+from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "plugins/commspt_bot/templates"
@@ -128,7 +131,9 @@ def renderer(monkeypatch):
     monkeypatch.setitem(sys.modules, "nonebot", nonebot)
     config = ModuleType("plugins.commspt_bot.config")
     config.S_ = SimpleNamespace(
-        browserless_mode="REMOTE", api_browserless=SimpleNamespace(endpoint="https://example.com")
+        browserless_mode="REMOTE",
+        api_browserless=SimpleNamespace(endpoint="https://example.com"),
+        user_card_auto_theme=False,
     )
     config.TEMPLATE_DIR = TEMPLATES
     config.VERIFY_CONTENT = True
@@ -247,3 +252,97 @@ async def test_user_card_requests_full_content_and_keeps_dark_mode(renderer, mon
     assert screenshot.await_args.kwargs["register_at"] == "2024-02-09 14:23:11"
     assert screenshot.await_args.kwargs["last_sign_at"] == "2026-10-12 19:47:26"
     assert screenshot.await_args.kwargs["generated_at"] == "2026-10-12 20:00:00"
+
+
+@pytest.fixture
+def card_model(renderer, monkeypatch):
+    monkeypatch.setitem(sys.modules, "plugins.commspt_bot.utils.browserless", renderer)
+    ipip = ModuleType("plugins.commspt_bot.models.bingling_ipip")
+    ipip.BingLingIPIP = SimpleNamespace(
+        get=AsyncMock(
+            return_value=SimpleNamespace(
+                country_name="中国",
+                region_name="上海",
+                city_name="",
+                isp_domain="示例",
+                owner_domain="网络",
+            )
+        )
+    )
+    monkeypatch.setitem(sys.modules, ipip.__name__, ipip)
+    model = load_isolated_module(monkeypatch, "card_auto_theme_model", "plugins/commspt_bot/models/render_user_info.py")
+    monkeypatch.setattr(model, "screenshot", AsyncMock(return_value=b"png"))
+    return model
+
+
+def test_auto_theme_config_defaults_enabled():
+    # 执行真实配置 schema，避免加载部署配置、证书或机器人。
+    classes = []
+    for node in ast.parse((ROOT / "plugins/commspt_bot/config.py").read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.ClassDef):
+            classes.append(node)
+            if node.name == "Setting":
+                break
+    scope = {"BaseModel": BaseModel, "Literal": Literal}
+    exec(compile(ast.Module(body=classes, type_ignores=[]), "config.py", "exec"), scope)  # noqa: S102
+    assert scope["Setting"]().user_card_auto_theme is True
+    assert scope["Setting"](user_card_auto_theme="false").user_card_auto_theme is False
+
+
+@pytest.mark.parametrize(
+    "timestamp,dark",
+    [
+        ("2026-10-12T06:59:59+08:00", True),
+        ("2026-10-12T07:00:00+08:00", False),
+        ("2026-10-12T18:59:59+08:00", False),
+        ("2026-10-12T19:00:00+08:00", True),
+        ("2026-10-12T22:59:59+00:00", True),
+        ("2026-10-12T23:00:00+00:00", False),
+        ("2026-10-12T10:59:59+00:00", False),
+        ("2026-10-12T11:00:00+00:00", True),
+    ],
+)
+def test_auto_theme_boundaries_and_utc_conversion(card_model, timestamp, dark):
+    assert card_model._is_dark_at(datetime.fromisoformat(timestamp)) is dark
+
+
+def test_auto_theme_rejects_ambiguous_naive_clock(card_model):
+    with pytest.raises(ValueError, match="timezone"):
+        card_model._is_dark_at(datetime(2026, 10, 12, 7))
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("account_dark", [False, True])
+@pytest.mark.parametrize("hour,auto_dark", [(7, False), (19, True)])
+async def test_auto_theme_and_account_preference(
+    card_model, renderer, user_data, enabled, account_dark, hour, auto_dark
+):
+    renderer.S_.user_card_auto_theme = enabled
+    card = card_model.RenderUserInfo(**dict(user_data, ip=["192.0.2.41"], is_dark_mode=account_dark))
+    moment = datetime.fromisoformat(f"2026-10-12T{hour:02}:00:00+08:00")
+    assert await card.get_image(now=moment) == b"png"
+    assert card_model.screenshot.await_args.kwargs["is_dark_mode"] is (auto_dark if enabled else account_dark)
+    assert card.is_dark_mode is account_dark
+
+
+@pytest.mark.parametrize("hour,theme", [(7, "light"), (19, "dark")])
+async def test_auto_theme_keeps_ban_notice(card_model, renderer, user_data, template, hour, theme):
+    renderer.S_.user_card_auto_theme = True
+    card = card_model.RenderUserInfo(**dict(user_data, ip=["192.0.2.41"], permission=-1, ban_reason=None))
+    await card.get_image(now=datetime.fromisoformat(f"2026-10-12T{hour:02}:00:00+08:00"))
+    html = template.render(card_model.screenshot.await_args.kwargs)
+    assert f'data-theme="{theme}"' in html
+    assert 'class="record is-banned"' in html
+    assert 'class="ban-icon"' in html
+    assert "未提供封禁原因" in html
+
+
+async def test_auto_theme_default_clock_is_explicit_utc(card_model, renderer, user_data, monkeypatch):
+    renderer.S_.user_card_auto_theme = True
+
+    moment = datetime.fromisoformat("2026-10-12T11:00:00+00:00")
+    monkeypatch.setattr(card_model.arrow, "utcnow", lambda: SimpleNamespace(datetime=moment))
+    card = card_model.RenderUserInfo(**dict(user_data, ip=["192.0.2.41"], is_dark_mode=False))
+    await card.get_image()
+    assert card_model.screenshot.await_args.kwargs["is_dark_mode"] is True
+    assert card.is_dark_mode is False

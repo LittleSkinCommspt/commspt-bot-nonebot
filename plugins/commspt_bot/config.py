@@ -140,6 +140,9 @@ class Setting(BaseModel):
     # 环境变量 BROWSERLESS_MODE（LOCAL 需安装可选依赖 render-local 并执行 playwright install chromium）
     browserless_mode: Literal["REMOTE", "LOCAL"] = "REMOTE"
 
+    # 用户信息卡按北京时间自动切换主题；关闭后跟随被查询账户的 is_dark_mode。
+    user_card_auto_theme: bool = True
+
     littleskin_admin_token: str = ""
 
     # 外部网络服务请求失败后的重试次数（首次失败后再重试的次数）

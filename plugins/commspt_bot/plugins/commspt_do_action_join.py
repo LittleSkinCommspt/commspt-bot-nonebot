@@ -3,26 +3,31 @@
 对应 Avilla 原版 modules/do_action_join.py。
 使用 NoneBot 原生 ``on_regex`` + OneBot V11 API 实现，不依赖 Alconna / UniMessage。
 通过回复机器人发送的「新的入群申请」通知消息，解析出 sub_type 与 flag，
-调用 OneBot V11 的 set_group_add_request API 执行批准或拒绝入群。
+调用入群审批公共执行核心 ``execute_join_action`` 批准或拒绝入群。
+
+执行核心与表情回应审批（贴 👍/👎）共用，保证两条入口行为一致；
+同一条申请被任一入口处理后再由另一入口处理，会得到「已过期/已处理」提示。
 
 命令（裸命令，不受全局 COMMAND_START 影响）：
 - do <accept|reject> [reason]   通过或拒绝入群申请   (in_preset_cafe; admin_only)
 """
 
 import re
-from typing import Literal, assert_never
+from typing import Literal
 
 from nonebot import logger, on_regex
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, OneBotV11AdapterException
+from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 from nonebot.params import RegexDict
 
 from plugins.commspt_bot.utils.adv_filter import admin_only, in_preset_cafe
+from plugins.commspt_bot.utils.join_action import (
+    DEFAULT_REJECT_REASON,
+    describe_result,
+    execute_join_action,
+)
 from plugins.commspt_bot.utils.join_request_notice import JoinRequestNoticeError, parse_join_request_notice
 from plugins.commspt_bot.utils.onebot_message import reply_to
 from plugins.commspt_bot.utils.random_sleep import random_sleep
-
-# 拒绝原因默认值（与 Alconna 原实现保持一致）
-_DEFAULT_REJECT_REASON = "答案错误，再仔细看看"
 
 # 裸命令匹配模式：以「do」开头，不接受任何 COMMAND_START 前缀；
 # reject 的原因仅取单个不含空白的原因词，多词原因不匹配（沿用原行为）。
@@ -46,7 +51,7 @@ async def do_action_join(bot: Bot, event: MessageEvent, groups: dict = RegexDict
     logger.info("received do action (join group request)")
 
     action: Literal["accept", "reject"] = groups["action"]
-    reason: str = groups.get("reason") or _DEFAULT_REJECT_REASON
+    reason: str = groups.get("reason") or DEFAULT_REJECT_REASON
 
     if not event.reply:
         await do_action.send(reply_to(event) + "需要回复一条申请提示消息以进行处理")
@@ -55,8 +60,7 @@ async def do_action_join(bot: Bot, event: MessageEvent, groups: dict = RegexDict
     try:
         reply_sender_id = int(event.reply.sender.user_id)
     except (TypeError, ValueError):
-        await do_action.send(reply_to(event) + "无法验证通知来源")
-        return
+        reply_sender_id = None
     if reply_sender_id != int(bot.self_id):
         await do_action.send(reply_to(event) + "无法验证通知来源")
         return
@@ -68,41 +72,13 @@ async def do_action_join(bot: Bot, event: MessageEvent, groups: dict = RegexDict
         return
 
     await random_sleep(3)
-    try:
-        match action:
-            case "accept":
-                await bot.set_group_add_request(flag=notice.flag, sub_type=notice.sub_type, approve=True)
-                logger.info("accepted")
-            case "reject":
-                await bot.set_group_add_request(
-                    flag=notice.flag,
-                    sub_type=notice.sub_type,
-                    approve=False,
-                    reason=reason,
-                )
-                logger.info("rejected")
-            case unreachable:
-                assert_never(unreachable)
-    except OneBotV11AdapterException as exception:
-        logger.error(
-            "join moderation action failed: action={action} group={group} subtype={subtype} exception={exception}",
-            action=action,
-            group=event.group_id,
-            subtype=notice.sub_type,
-            exception=type(exception).__name__,
-        )
-        await do_action.send(reply_to(event) + "处理失败：请求可能已过期、已处理，或被平台拒绝")
-        return
+    result = await execute_join_action(
+        bot,
+        notice,
+        approve=(action == "accept"),
+        reason=reason,  # 仅 reject 时生效
+        operator_id=int(event.user_id),
+        source="command",
+    )
 
-    try:
-        await do_action.send(reply_to(event) + f"{action}ed {notice.applicant}")
-    except OneBotV11AdapterException as exception:
-        logger.error(
-            "join moderation action succeeded, notification failed: "
-            "action={action} group={group} subtype={subtype} exception={exception}",
-            action=action,
-            group=event.group_id,
-            subtype=notice.sub_type,
-            exception=type(exception).__name__,
-        )
-        return
+    await do_action.send(reply_to(event) + describe_result(result, action))

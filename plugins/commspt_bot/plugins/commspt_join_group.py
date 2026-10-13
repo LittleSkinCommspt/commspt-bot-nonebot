@@ -22,13 +22,20 @@ from nonebot.adapters.onebot.v11 import (
 from nonebot.rule import Rule
 from nonebot_plugin_alconna.uniseg import UniMessage
 
-from plugins.commspt_bot.config import JOIN_ANNOUNCEMENT_FILE, S_
+from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.cloudconfig import CloudConfig
 from plugins.commspt_bot.models.littleskin_api import LittleSkinUser
 from plugins.commspt_bot.models.mongodb_data import UIDMapping
 from plugins.commspt_bot.models.render_user_info import RenderUserInfo
-from plugins.commspt_bot.utils.join_request_notice import format_join_request_notice
+from plugins.commspt_bot.utils.join_action import APPROVAL_EMOJIS, remember_approval
+from plugins.commspt_bot.utils.join_request_notice import (
+    JoinRequestNotice,
+    NoticeKind,
+    NoticeSubtype,
+    format_join_request_notice,
+)
 from plugins.commspt_bot.utils.messenger import send_to_group as _send_to_group
+from plugins.commspt_bot.utils.messenger import send_to_group_with_id as _send_to_group_with_id
 from plugins.commspt_bot.utils.qq_profile import get_qq_nickname
 from plugins.commspt_bot.utils.random_sleep import random_sleep
 
@@ -39,6 +46,59 @@ def _group_rule(group_id: int):
         return getattr(event, "group_id", None) == group_id
 
     return Rule(_checker)
+
+
+async def _send_approval_notice(
+    bot: Bot,
+    group_id: int,
+    kind: NoticeKind,
+    applicant: int,
+    answer: str,
+    sub_type: NoticeSubtype,
+    flag: str,
+    message: list[str],
+    image: bytes | None = None,
+) -> None:
+    """向群聊发送入群审批通知并贴上 👍/👎 表情，登记表情审批凭证。
+
+    仅用于「需要管理员人工处理」的通知；自动通过 / 纯结果通知请直接用 _send_to_group。
+    协议端不支持 set_msg_emoji_like 时静默降级，不影响 do 命令审批。
+    """
+    notice = JoinRequestNotice(
+        kind=kind,
+        applicant=applicant,
+        answer=answer,
+        sub_type=sub_type,
+        flag=flag,
+    )
+    # 保持与旧实现一致：通知块在前，附加提示行在后
+    parts = [format_join_request_notice(kind, applicant, answer, sub_type, flag), *message]
+    noti = UniMessage()
+    if image:
+        noti = noti.image(raw=image)
+    noti = noti + "\n\n".join(m for m in parts if m)
+
+    raw_msg_id = await _send_to_group_with_id(group_id, noti)
+    try:
+        message_id = int(raw_msg_id) if raw_msg_id is not None else None
+    except (TypeError, ValueError):
+        message_id = None
+    if message_id is None:
+        logger.warning("无法从发送回执解析 message_id，跳过贴表情（可用 do 命令审批）")
+        return
+
+    for emoji in APPROVAL_EMOJIS:
+        try:
+            await bot.call_api(
+                "set_msg_emoji_like",
+                message_id=message_id,
+                emoji_id=emoji,
+                set=True,
+            )
+        except Exception as e:
+            logger.warning(f"贴表情 {emoji} 失败：{type(e).__name__}: {e}")
+
+    await remember_approval(message_id, notice)
 
 
 # region member join request
@@ -61,9 +121,6 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
 
     answer = req.comment.splitlines()[-1].removeprefix("答案：").strip()  # 从申请留言最后一行提取填写的 UID 答案
     logger.info(f"Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
-    message.append(
-        format_join_request_notice("Main", applicant, answer, req.sub_type, req.flag),
-    )
 
     try:
         cloudconfig = await CloudConfig.fetch()
@@ -71,6 +128,7 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             await random_sleep(3)  # sleep before action
             await req.approve(bot)  # 调用 OneBot V11 API 同意入群申请
 
+            message.append(format_join_request_notice("Main", applicant, answer, req.sub_type, req.flag))
             message.append("👆 已同意 [云控策略：enable_auto_accept_join_request_main]")
             logger.info(
                 f"Member Join Request Event {req.sub_type} flag={req.flag} was auto accepted by cloudconfig policy "
@@ -87,10 +145,17 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
         logger.warning(
             f"(main) Member Join Request Event {req.sub_type} was ignored. (ANSWER NOT DECIMAL) {applicant} > {answer}",
         )
-        message.append("👀 答案不是纯数字，需手动处理")
-
         await random_sleep(3)  # sleep before action
-        await _send_to_group(S_.defined_qq.commspt_group, "\n\n".join(m for m in message if m))
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.commspt_group,
+            "Main",
+            applicant,
+            answer,
+            req.sub_type,
+            req.flag,
+            ["👀 答案不是纯数字，需手动处理"],
+        )
         return
 
     uid = int(answer)
@@ -149,20 +214,22 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
     if api_error:
         # 请求失败仍需向群聊发送加群申请通知，方便管理员交互处理
         await random_sleep(4)  # sleep before action
-        await _send_to_group(S_.defined_qq.commspt_group, "\n\n".join(m for m in message if m))
+        await _send_approval_notice(
+            bot, S_.defined_qq.commspt_group, "Main", applicant, answer, req.sub_type, req.flag, message, image
+        )
         return
 
     if uid_not_exists:
         await random_sleep(3)  # sleep before action
-        await _send_to_group(S_.defined_qq.commspt_group, "\n\n".join(m for m in message if m))
+        await _send_approval_notice(
+            bot, S_.defined_qq.commspt_group, "Main", applicant, answer, req.sub_type, req.flag, message, image
+        )
         return
 
     await random_sleep(4)  # sleep before action
-    noti = UniMessage()
-    if image:
-        noti = noti.image(raw=image)
-    noti = noti + "\n\n".join(m for m in message if m)
-    await _send_to_group(S_.defined_qq.commspt_group, noti)
+    await _send_approval_notice(
+        bot, S_.defined_qq.commspt_group, "Main", applicant, answer, req.sub_type, req.flag, message, image
+    )
 
 
 # endregion
@@ -178,23 +245,27 @@ cafe_join_request = on_request(
 async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
     req = event
     applicant = req.user_id
-    message: list[str] = []
     if not req.comment:
         return
 
     answer = req.comment.splitlines()[-1].removeprefix("答案：").strip()  # 从申请留言最后一行提取填写的 UID 答案
     logger.info(f"(cafe) Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
-    message.append(
-        format_join_request_notice("Cafe", applicant, answer, req.sub_type, req.flag),
-    )
 
     if not answer.isdecimal():  # UID 应为十进制纯数字
         logger.warning(
             f"(cafe) Member Join Request Event {req.sub_type} was ignored. (ANSWER NOT DECIMAL) {applicant} > {answer}",
         )
-        message.append("👀 答案不是纯数字，需手动处理")
         # 即便无法自动处理，也需向群聊发送申请通知，方便管理员交互处理
-        await _send_to_group(S_.defined_qq.littleskin_cafe, "\n\n".join(m for m in message if m))
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.littleskin_cafe,
+            "Cafe",
+            applicant,
+            answer,
+            req.sub_type,
+            req.flag,
+            ["👀 答案不是纯数字，需手动处理"],
+        )
         return
 
     uid = int(answer)
@@ -208,8 +279,16 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
     except Exception as e:
         # 主站不可用时降级：仍发送申请通知，交由管理员手动处理
         logger.exception(e)
-        message.append("⚠️ 需手动处理")
-        await _send_to_group(S_.defined_qq.littleskin_cafe, "\n\n".join(m for m in message if m))
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.littleskin_cafe,
+            "Cafe",
+            applicant,
+            answer,
+            req.sub_type,
+            req.flag,
+            ["⚠️ 需手动处理"],
+        )
         return
 
     if not uid_exists:
@@ -217,12 +296,21 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
         logger.warning(
             f"(cafe) Member Join Request Event {req.sub_type} was ignored. (UID NOT EXISTS) {applicant} > {answer}",
         )
-        message.append("👀 这个 UID 根本不存在，需手动处理")
-        await _send_to_group(S_.defined_qq.littleskin_cafe, "\n\n".join(m for m in message if m))
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.littleskin_cafe,
+            "Cafe",
+            applicant,
+            answer,
+            req.sub_type,
+            req.flag,
+            ["👀 这个 UID 根本不存在，需手动处理"],
+        )
         return
 
     # general: approve
     mapping_failed = False
+    message: list[str] = []
     try:
         mapping_uid = await UIDMapping.fetch(qq=applicant)
         status = "✅" if (mapping_uid and mapping_uid.uid == uid) else "⚠️"  # 检查是否与主群记录的 UID 映射一致

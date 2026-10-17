@@ -7,19 +7,26 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from nonebot import logger
 from pydantic import BaseModel
 
 from plugins.commspt_bot.config import S_, VERIFY_CONTENT
+from plugins.commspt_bot.utils.retry import call_with_retry
 
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
 """飞书开放平台 API 根地址。"""
 
 TOKEN_REFRESH_MARGIN = 300
 """提前刷新 tenant_access_token 的秒数。"""
+
+FIELD_MAX_PAGES = 10
+"""列出字段时的最大翻页数，防止异常分页信息导致死循环。"""
+
+SEARCH_MAX_PAGES = 20
+"""检索记录时的最大翻页数，防止异常分页信息导致死循环。"""
 
 FIELD_TYPE_TEXT = 1
 FIELD_TYPE_NUMBER = 2
@@ -169,15 +176,17 @@ class FeishuBitable:
                 "请在 .env 中填写 API_FEISHU__APP_ID 与 API_FEISHU__APP_SECRET",
             )
 
-        async with FeishuBitable._client() as client:
-            resp = await client.post(
-                f"{FEISHU_BASE_URL}/auth/v3/tenant_access_token/internal",
-                json={"app_id": app_id, "app_secret": app_secret},
-            )
-        resp.raise_for_status()
+        resp = cast(
+            httpx.Response,
+            await call_with_retry("飞书 API（获取凭证）", FeishuBitable._post_token, app_id, app_secret),
+        )
         payload = resp.json()
-        if int(payload.get("code", -1)) != 0:
-            raise FeishuAPIError(int(payload.get("code", -1)), str(payload.get("msg", "")))
+        if int(payload.get("code", -1)) != 0 or resp.status_code >= 400:
+            # 凭证错误属于配置问题，重试无意义，直接抛出可读提示
+            raise FeishuAPIError(
+                int(payload.get("code", -1)),
+                str(payload.get("msg", "")) or f"HTTP {resp.status_code}",
+            )
 
         token = payload["tenant_access_token"]
         expire = int(payload.get("expire", 7200))
@@ -187,17 +196,49 @@ class FeishuBitable:
         return token
 
     @classmethod
+    async def _send(cls, method: str, path: str, token: str, **kwargs) -> httpx.Response:
+        """发送单次业务请求。
+
+        5xx 以 ``HTTPStatusError`` 抛出，交由 ``call_with_retry`` 判定为瞬时故障重试；
+        4xx 原样返回，由上层解析飞书业务错误码（这类错误重试无意义）。
+        """
+        async with cls._client() as client:
+            resp = await client.request(
+                method,
+                f"{FEISHU_BASE_URL}{path}",
+                headers={"Authorization": f"Bearer {token}"},
+                **kwargs,
+            )
+        if resp.status_code >= 500:
+            resp.raise_for_status()
+        return resp
+
+    @staticmethod
+    async def _post_token(app_id: str, app_secret: str) -> httpx.Response:
+        """请求 tenant_access_token，5xx 交由重试层处理。"""
+        async with FeishuBitable._client() as client:
+            resp = await client.post(
+                f"{FEISHU_BASE_URL}/auth/v3/tenant_access_token/internal",
+                json={"app_id": app_id, "app_secret": app_secret},
+            )
+        if resp.status_code >= 500:
+            resp.raise_for_status()
+        return resp
+
+    @classmethod
     async def _request(cls, method: str, path: str, **kwargs) -> dict[str, Any]:
-        """发起带鉴权的请求，token 失效时强制刷新后重试一次。"""
+        """发起带鉴权的请求。
+
+        网络层失败（超时、连接错误、5xx）由 ``call_with_retry`` 按 ``FAILED_RETRY_TIME``
+        重试；token 失效（99991663）时强制刷新后重跑一次。``kwargs`` 在进入重试前即已
+        固化，因此写入请求的 ``client_token`` 在重试之间保持不变，不会产生重复记录。
+        """
         for attempt in (1, 2):
             token = await cls._get_token(force_refresh=attempt == 2)
-            async with cls._client() as client:
-                resp = await client.request(
-                    method,
-                    f"{FEISHU_BASE_URL}{path}",
-                    headers={"Authorization": f"Bearer {token}"},
-                    **kwargs,
-                )
+            resp = cast(
+                httpx.Response,
+                await call_with_retry("飞书 API", cls._send, method, path, token, **kwargs),
+            )
 
             if resp.status_code >= 400:
                 err = _api_error_from(resp)
@@ -220,14 +261,27 @@ class FeishuBitable:
         raise FeishuAPIError(99991663, "tenant_access_token 刷新后仍然无效")
 
     async def fetch_fields(self) -> list[FeishuField]:
-        """列出数据表全部字段（含单选/多选的选项名称）。"""
-        data = await self._request(
-            "GET",
-            f"/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/fields",
-            params={"page_size": 100},
-        )
+        """列出数据表全部字段（含单选/多选的选项名称），自动翻页。"""
+        items: list[dict[str, Any]] = []
+        page_token: str | None = None
+        for _ in range(FIELD_MAX_PAGES):
+            params: dict[str, Any] = {"page_size": 100}
+            if page_token:
+                params["page_token"] = page_token
+            data = await self._request(
+                "GET",
+                f"/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/fields",
+                params=params,
+            )
+            items.extend(data.get("items") or [])
+            page_token = data.get("page_token")
+            if not data.get("has_more") or not page_token:
+                break
+        else:
+            logger.warning(f"字段数超过 {FIELD_MAX_PAGES} 页上限，仅解析前 {len(items)} 个")
+
         result: list[FeishuField] = []
-        for item in data.get("items") or []:
+        for item in items:
             options = [
                 str(opt.get("name", ""))
                 for opt in ((item.get("property") or {}).get("options") or [])
@@ -311,9 +365,9 @@ class FeishuBitable:
         self,
         conditions: list[tuple[str, str]],
         logic: str = "or",
-        page_size: int = 20,
+        page_size: int = 100,
     ) -> list[dict[str, Any]]:
-        """按 ``(列名, 值)`` 精确匹配检索记录。"""
+        """按 ``(列名, 值)`` 精确匹配检索记录，自动翻页。"""
         filter_conditions = [
             {"field_name": name, "operator": "is", "value": [str(value)]}
             for name, value in conditions
@@ -322,10 +376,24 @@ class FeishuBitable:
         if not filter_conditions:
             return []
 
-        data = await self._request(
-            "POST",
-            f"/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records/search",
-            params={"page_size": page_size},
-            json={"filter": {"conjunction": logic, "conditions": filter_conditions}},
-        )
-        return data.get("items") or []
+        body = {"filter": {"conjunction": logic, "conditions": filter_conditions}}
+        items: list[dict[str, Any]] = []
+        page_token: str | None = None
+        for _ in range(SEARCH_MAX_PAGES):
+            params: dict[str, Any] = {"page_size": page_size}
+            if page_token:
+                params["page_token"] = page_token
+            data = await self._request(
+                "POST",
+                f"/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records/search",
+                params=params,
+                json=body,
+            )
+            items.extend(data.get("items") or [])
+            page_token = data.get("page_token")
+            if not data.get("has_more") or not page_token:
+                break
+        else:
+            logger.warning(f"检索结果超过 {SEARCH_MAX_PAGES} 页上限，仅返回前 {len(items)} 条")
+
+        return items

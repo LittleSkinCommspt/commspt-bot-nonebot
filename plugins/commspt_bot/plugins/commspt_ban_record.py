@@ -84,6 +84,11 @@ async def _load_categories(bitable: FeishuBitable, fields: list[FeishuField], ma
     return options
 
 
+def _writable_columns(fields: list[FeishuField]) -> set[str]:
+    """返回当前表格中可写入的列名集合（排除公式、查找引用等只读列）。"""
+    return {field.field_name for field in fields if not field.readonly}
+
+
 def _describe_fields(fields: list[FeishuField]) -> str:
     """把表格字段渲染为一行提示，便于管理员核对列名。"""
     if not fields:
@@ -135,12 +140,12 @@ async def _banlog(bot: Bot, event: MessageEvent):
         await banlog.send(reply_to(event) + f"读取表格字段失败：{e}")
         return
 
-    if missing := missing_required_fields(mapping):
+    if missing := missing_required_fields(mapping, _writable_columns(fields)):
         names = "、".join(FIELD_LABELS.get(name, name) for name in missing)
         await banlog.send(
             reply_to(event)
-            + f"表格缺少必需列：{names}\n表内现有字段：{_describe_fields(fields)}\n"
-            + "请在 .env 中显式指定 FEISHU_BAN__FIELDS__* 列名配置。"
+            + f"表格缺少必需列或必需列不可写：{names}\n表内现有字段：{_describe_fields(fields)}\n"
+            + "请在 .env 中显式指定 FEISHU_BAN__FIELDS__* 列名配置，且不要映射到公式/查找引用等只读列。"
         )
         return
 
@@ -169,7 +174,7 @@ async def _banlog(bot: Bot, event: MessageEvent):
         await banlog.send(reply_to(event) + f"写入表格失败：{e}")
         return
 
-    logger.success(f"&banlog 写入成功 record_id={record_id} fields={payload}")
+    logger.success(f"&banlog 写入成功 record_id={record_id}")
     reply = f"已写入封禁记录（UID {args.uid} / {'、'.join(args.categories)}）"
     if args.note:
         reply += f"\n备注：{args.note}"
@@ -207,7 +212,7 @@ async def _banlog_fields(bot: Bot, event: MessageEvent):
         options = await _load_categories(bitable, fields, mapping)
         lines.extend(("", f"可选类别：{'、'.join(sorted(options)) or '（未配置选项）'}"))
 
-    if missing := missing_required_fields(mapping):
-        lines.extend(("", "⚠️ 缺少必需列：" + "、".join(FIELD_LABELS.get(n, n) for n in missing)))
+    if missing := missing_required_fields(mapping, _writable_columns(fields)):
+        lines.extend(("", "⚠️ 缺少必需列或必需列不可写：" + "、".join(FIELD_LABELS.get(n, n) for n in missing)))
 
     await banlog_fields.send(reply_to(event) + "\n".join(lines))

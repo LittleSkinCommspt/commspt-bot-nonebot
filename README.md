@@ -101,7 +101,7 @@ cp config.yml.example config.yml
 | `FAILED_RETRY_TIME` | 外部网络服务请求失败后的重试次数（默认 `2`，即合计最多 3 次请求；`0` 表示不重试）。生效于 `&ygg` / `&pro` / `&user` / `&uid`，渲染类服务（SkinRenderMC / Browserless / 本地 Playwright）与 QQ 协议端调用不重试 |
 | `API_SKINRENDERMC__ENDPOINT` | 皮肤渲染服务 |
 | `API_CLOUDCONFIG` | 云控配置（JSON 对象） |
-| `API_FEISHU__APP_ID` / `API_FEISHU__APP_SECRET` | 飞书自建应用凭证（`&banlog` 写多维表格用），见[飞书封禁记录](#飞书封禁记录) |
+| `API_FEISHU__APP_ID` / `API_FEISHU__APP_SECRET` | 飞书自建应用凭证（`&banlog` 写多维表格用），见[飞书封禁记录](#feishu-ban-record) |
 | `FEISHU_BAN__APP_TOKEN` / `FEISHU_BAN__TABLE_ID` | 多维表格 `app_token` 与 `table_id` |
 | `FEISHU_BAN__FIELDS__*` | 多维表格中各逻辑字段对应的列名 |
 | `COMMSPT_SIMPLE_RESPONSE_FILE` | 简易问答内容 JSON 文件路径（默认项目根目录 `commspt_simple_response.json`） |
@@ -202,7 +202,7 @@ UID / 积分 / 邮箱 / QQ / 时间戳等编号类字段另用等宽字体栈（
 
 - **凭证缓存**：`tenant_access_token` 在进程内缓存，提前 5 分钟刷新；遇到 `99991663` 会强制刷新并重试一次。
 - **幂等写入**：每次新增记录生成 uuid4 作为 `client_token`，网络超时后的重试不会在表格中产生重复行。
-- **列名不硬编码**：按别名自动匹配表格列名，`config.yml` 中显式指定的列名优先；配置了但表格中不存在的列会被视为缺列并明确报错，不会静默写歪。
+- **列名不硬编码**：按别名自动匹配表格列名，`.env` 的 `FEISHU_BAN__FIELDS__*` 显式指定优先；配置了但表格中不存在的列、或必需字段映射到了只读列，都会被视为缺列并明确报错，不会静默写歪。
 - **只读列保护**：公式、查找引用、创建/修改时间、关联字段等系统列在组装请求体时自动跳过。
 - **错误翻译**：`91403`（未加为协作者）、`1254302`（高级权限未授权）、`1254018`（字段名不存在）等错误码会翻译成可操作的中文提示。
 

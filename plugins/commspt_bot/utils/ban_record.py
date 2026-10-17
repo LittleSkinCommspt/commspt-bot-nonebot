@@ -137,6 +137,16 @@ def resolve_field_mapping(
     return resolved
 
 
-def missing_required_fields(mapping: dict[str, str]) -> list[str]:
-    """返回未映射到表格列的必需逻辑字段。"""
-    return [name for name in REQUIRED_FIELDS if name not in mapping]
+def missing_required_fields(mapping: dict[str, str], writable: set[str] | None = None) -> list[str]:
+    """返回不可用的必需逻辑字段。
+
+    未映射到表格列的字段视为缺失；传入 ``writable`` 时，映射到只读列（公式、查找
+    引用、创建/修改时间等）的字段同样视为缺失——这类列写入时会被静默跳过，
+    不提前拦下就会产生缺字段的脏记录。
+    """
+    missing = []
+    for name in REQUIRED_FIELDS:
+        column = mapping.get(name)
+        if column is None or (writable is not None and column not in writable):
+            missing.append(name)
+    return missing

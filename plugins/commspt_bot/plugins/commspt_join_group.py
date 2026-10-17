@@ -27,6 +27,7 @@ from plugins.commspt_bot.models.cloudconfig import CloudConfig
 from plugins.commspt_bot.models.littleskin_api import LittleSkinUser
 from plugins.commspt_bot.models.mongodb_data import UIDMapping
 from plugins.commspt_bot.models.render_user_info import RenderUserInfo
+from plugins.commspt_bot.utils.ban_lookup import banned_records_block
 from plugins.commspt_bot.utils.join_action import APPROVAL_EMOJIS, remember_approval
 from plugins.commspt_bot.utils.join_request_notice import (
     JoinRequestNotice,
@@ -212,6 +213,10 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
                     **ltsk_user.model_dump(), qq=int(applicant), qq_nickname=await get_qq_nickname(bot, applicant)
                 )
                 image = await render.get_image()
+                # 该账号被封禁时，在审批通知里附上飞书封禁记录
+                # （通知只发往内部管理群，无需再判断群号）
+                if block := await banned_records_block(ltsk_user.uid, permission=ltsk_user.permission):
+                    message.append(block)
             else:
                 message.append("👀 未获取到 UID 信息，无法渲染图片")
     except Exception as e:

@@ -7,6 +7,10 @@
 命令：
 - &user <uid>            查询指定 UID 用户的资料卡片并渲染为图片   (适用群: in_preset_commspt; 权限: admin_only)
 - &setuid <target> <uid> 绑定目标 QQ (@ 提及或纯数字) 与 LittleSkin UID   (适用群: in_preset_cafe; 权限: admin_only)
+
+附加行为：若被查询账号处于封禁状态（permission == -1），则在资料卡片后一并发出
+该 UID 在飞书多维表格中的封禁记录。命令本身仅限 commspt_group / dev_group 可用，
+故无需再单独判断群号。
 """
 
 from arclet.alconna import Alconna, Args, CommandMeta
@@ -23,6 +27,7 @@ from plugins.commspt_bot.utils.adv_filter import (
     in_preset_cafe,
     in_preset_commspt,
 )
+from plugins.commspt_bot.utils.ban_lookup import banned_records_block
 from plugins.commspt_bot.utils.mongodb_manager import write_uid_db
 from plugins.commspt_bot.utils.qq_profile import get_qq_nickname
 from plugins.commspt_bot.utils.replies import SERVICE_FAILURE_MESSAGE
@@ -76,6 +81,11 @@ async def _user_info(bot: Bot, uid: Match[int]):
         return
     await user_info.send(UniMessage.image(raw=image))
     logger.success("Image sent.")
+
+    # 账号被封禁时，追加该 UID 的飞书封禁记录
+    # （命令规则已限定 commspt_group / dev_group，无需再判断群号）
+    if block := await banned_records_block(uid.result, permission=ltsk_user.permission):
+        await user_info.send(UniMessage(block))
 
 
 set_uid = on_alconna(

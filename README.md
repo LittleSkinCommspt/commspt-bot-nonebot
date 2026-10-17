@@ -11,6 +11,7 @@ LittleSkin 的社区支持 QQ 机器人，主要基于 [nonebot/nonebot2](https:
 - **双后端出图**：`BROWSERLESS_MODE` 可在远程 Browserless 服务与本地 Playwright 渲染间切换
 - **外部服务失败重试**：`FAILED_RETRY_TIME` 控制重试次数（默认 2，即合计最多 3 次请求），失败后回复统一提示「处理你的请求时发生了一些问题」并记录各网络服务的中文失败日志
 - **入群审批双入口**：既可在通知消息下回复 `do accept` / `do reject` 文字命令审批，也可直接对通知消息贴 👍 / 👎 表情快捷审批（见[入群审批](#join-approval)）
+- **封禁记录上云**：`&banlog` 一条命令把封禁信息写入飞书多维表格，类别走表格选项校验，支持多选与备注（见[飞书封禁记录](#feishu-ban-record)）
 
 ## 目录结构
 *此结构可以表达大部分框架原理，但可能不是实时更新*
@@ -27,6 +28,7 @@ plugins/commspt_bot/              # 父插件（共享层）
 │   ├── csl_api.py                # CustomSkinLoader API
 │   ├── version_api.py            # 版本查询（CSL / Authlib / Liberica Java）
 │   ├── bingling_ipip.py          # IP 归属地
+│   ├── feishu_bitable.py         # 飞书多维表格客户端（&banlog 写入）
 │   └── render_user_info.py       # 用户信息卡数据模型 + 出图
 ├── utils/
 │   ├── adv_filter.py             # 群白名单 / 管理员 规则与权限
@@ -37,9 +39,11 @@ plugins/commspt_bot/              # 父插件（共享层）
 │   ├── onebot_message.py         # 原生命令匹配 / 参数解析 / 引用回复工具
 │   ├── skinrendermcapi.py        # 皮肤渲染 + 水印
 │   ├── mongodb_manager.py        # UID 映射读写
+│   ├── ban_lookup.py             # 按 UID 查询封禁记录（&user / 入群通知复用）
+│   ├── ban_record.py             # &banlog 参数解析与表格列名映射（纯函数）
 │   └── random_sleep.py           # 随机延时（拟人化）
 ├── templates/                    # 用户信息卡模板
-└── plugins/                      # 13 个子插件（每个功能一个）
+└── plugins/                      # 14 个子插件（每个功能一个）
     ├── commspt_simple_response.py    # 单一 on_message 分发器，服务 commspt_simple_response.json 中的全部静态问答命令；管理员 &sreload 可在运行时热重载
     ├── commspt_profile.py            # &ygg / &pro 玩家查询
     ├── commspt_cao.py                # 生草复读机
@@ -49,6 +53,7 @@ plugins/commspt_bot/              # 父插件（共享层）
     ├── commspt_group_member.py       # &uid QQ↔UID 查询
     ├── commspt_get_latest.py         # &csl.latest / &ygg.latest / &java.latest
     ├── commspt_mute.py               # &mute / &unmute / &recall / &muteall ...（原生 OneBot V11）
+    ├── commspt_ban_record.py         # &banlog 封禁记录写入飞书多维表格
     ├── commspt_join_group.py         # 入群申请审核 + 新成员欢迎
     ├── commspt_do_action_join.py     # do accept|reject 手动审批（回复通知消息，裸命令，原生 on_regex）
     ├── commspt_join_emoji.py         # 对审批通知贴 👍/👎 表情快捷审批（原生 on_notice）
@@ -96,6 +101,9 @@ cp config.yml.example config.yml
 | `FAILED_RETRY_TIME` | 外部网络服务请求失败后的重试次数（默认 `2`，即合计最多 3 次请求；`0` 表示不重试）。生效于 `&ygg` / `&pro` / `&user` / `&uid`，渲染类服务（SkinRenderMC / Browserless / 本地 Playwright）与 QQ 协议端调用不重试 |
 | `API_SKINRENDERMC__ENDPOINT` | 皮肤渲染服务 |
 | `API_CLOUDCONFIG` | 云控配置（JSON 对象） |
+| `API_FEISHU__APP_ID` / `API_FEISHU__APP_SECRET` | 飞书自建应用凭证（`&banlog` 写多维表格用），见[飞书封禁记录](#飞书封禁记录) |
+| `FEISHU_BAN__APP_TOKEN` / `FEISHU_BAN__TABLE_ID` | 多维表格 `app_token` 与 `table_id` |
+| `FEISHU_BAN__FIELDS__*` | 多维表格中各逻辑字段对应的列名 |
 | `COMMSPT_SIMPLE_RESPONSE_FILE` | 简易问答内容 JSON 文件路径（默认项目根目录 `commspt_simple_response.json`） |
 | `COMMSPT_ASSETS_DIR` | 静态资源目录（默认项目根目录 `assets/`） |
 
@@ -124,6 +132,100 @@ UID / 积分 / 邮箱 / QQ / 时间戳等编号类字段另用等宽字体栈（
 ### 用户信息卡主题
 
 `USER_CARD_AUTO_THEME` 默认开启：按 `Asia/Shanghai` 时区，07:00（含）至 19:00（不含）使用浅色，其余时间使用深色，与服务器本地时区无关。设为 `false` 后，完全恢复被查询账户的 `is_dark_mode` 偏好。该开关只影响用户信息卡，不修改账户数据，也不影响其他图卡。
+
+<a id="feishu-ban-record"></a>
+
+### 飞书封禁记录（`&banlog`）
+
+把管理员的封禁操作自动登记到飞书多维表格，便于团队复盘与查询。该功能**不与 LittleSkin 数据库联通**，UID 由命令直接给出。
+
+命令（管理员，`in_preset_cafe` 群组可用）：
+
+| 命令 | 说明 |
+|---|---|
+| `&banlog <UID> <类别...> [备注...]` | 写入一条封禁记录 |
+| `&banlog.fields` | 打印表格字段、类别选项与列名匹配结果（接入时自检用） |
+
+书写规则：
+
+- 第一个参数必须是纯数字 UID；
+- 其后连续属于表格「类别」列选项的 token 依次计入类别（该列是多选，可一次给多个）；
+- 从第一个不属于类别的 token 起，剩余全部作为备注；
+- 备注首词恰好与某个类别同名时，用 `--note` 强制划分：`&banlog 43228 账户异常 --note 上传材质 很多`。
+
+示例：
+
+```
+&banlog 43228 账户异常 批量上传大量材质
+&banlog 43228 昵称 角色名 同时封禁昵称和角色名
+```
+
+写入的列：`UID`（数字）、`类别`（多选）、`备注`（文本）、`自动化处理人员`（文本，取触发命令的管理员 QQ）。
+「处理人」是人员字段，只接受 `open_id` / `user_id` / `union_id`，应用身份无法写入，故该列留空。
+
+类别选项在运行时从表格字段读取（缓存 5 分钟），因此表格改选项后无需改代码。
+
+#### 前置配置
+
+1. 在 [开放平台](https://open.feishu.cn/app) 创建**企业自建应用**，取得 `App ID` / `App Secret`，填入 `.env`：
+
+   ```ini
+   API_FEISHU__APP_ID=cli_xxxxxxxxxxxxxxxx
+   API_FEISHU__APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   ```
+
+2. 为应用开通权限 **`bitable:app`**（查看、评论、编辑和管理多维表格）。该权限属免审权限，开通即生效。
+
+3. **发布应用版本**。要在多维表格的「添加文档应用」里搜到该应用，必须有已发布的版本，且同时满足：
+   - 已开启**机器人能力**（应用管理 → 添加应用能力 → 机器人）；
+   - 发布版本的**可用范围**包含多维表格的所有者。
+
+4. 打开多维表格 → 右上角 `⋯` → `更多` → **添加文档应用** → 搜索该应用 → 权限设为 **可编辑**。
+   ⚠️ 只给「可阅读」时，读接口正常但写入会返回 `403 / 91403 Forbidden`。
+
+5. 在 `.env` 中填写表格标识与列名映射：
+
+   ```ini
+   FEISHU_BAN__APP_TOKEN=bascnxxxxxxxxxxxxxxxxxxxxxxxx
+   FEISHU_BAN__TABLE_ID=tblxxxxxxxxxxxxxx
+   FEISHU_BAN__FIELDS__UID=UID
+   FEISHU_BAN__FIELDS__CATEGORY=类别
+   FEISHU_BAN__FIELDS__NOTE=备注
+   FEISHU_BAN__FIELDS__AUTO_OPERATOR=自动化处理人员
+   ```
+
+   列名留空则按内置别名自动探测，自动探测结果可用 `&banlog.fields` 查看。
+
+   若表格在知识库中（链接含 `/wiki/`），需先用 `wiki/v2/spaces/get_node` 换取真实的 `app_token`（`obj_token`）。
+
+#### 实现要点
+
+- **凭证缓存**：`tenant_access_token` 在进程内缓存，提前 5 分钟刷新；遇到 `99991663` 会强制刷新并重试一次。
+- **幂等写入**：每次新增记录生成 uuid4 作为 `client_token`，网络超时后的重试不会在表格中产生重复行。
+- **列名不硬编码**：按别名自动匹配表格列名，`config.yml` 中显式指定的列名优先；配置了但表格中不存在的列会被视为缺列并明确报错，不会静默写歪。
+- **只读列保护**：公式、查找引用、创建/修改时间、关联字段等系统列在组装请求体时自动跳过。
+- **错误翻译**：`91403`（未加为协作者）、`1254302`（高级权限未授权）、`1254018`（字段名不存在）等错误码会翻译成可操作的中文提示。
+
+#### 封禁记录附加展示
+
+当被查询账号处于**封禁状态**（`permission == -1`）时，以下位置会额外带上该 UID 在表格中的封禁记录：
+
+| 位置 | 触发条件 | 发送到 |
+|---|---|---|
+| `&user` | 查询落到封禁账号 | 当前群（`&user` 本身仅限 `commspt_group` / `dev_group`） |
+| 主群入群审批通知 | 申请所填 UID 对应账号被封禁 | `commspt_group` |
+
+茶馆群入群审批、新成员欢迎通知（发往 `notification_channel`）**不展示**封禁记录。
+
+展示格式：
+
+```
+📋 UID 43228 在封禁记录表中有 2 条记录：
+· 类别：昵称、角色名 / 备注：批量违规 / 处理人：841968078 / 时间：2026-10-17 20:15
+· 类别：账户异常 / 备注：批量上传材质 / 处理人：841968078 / 时间：2026-10-16 11:02
+```
+
+最多展示 5 条，超出部分只提示总数。该信息属于**附加内容**：飞书接口异常、表格未配置或缺少 UID 列时一律静默跳过，绝不影响 `&user` 出图或入群审批本身。
 
 <a id="join-approval"></a>
 

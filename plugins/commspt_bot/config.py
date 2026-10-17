@@ -20,6 +20,12 @@
     BROWSERLESS_MODE=REMOTE
     API_LITTLESKIN_ORIGIN__ENDPOINT=https://littleskin.cn
     API_CLOUDCONFIG={"endpoint": "...", "username": "...", "password": "..."}
+    API_FEISHU__APP_ID=cli_xxxxxxxxxxxxxxxx
+    API_FEISHU__APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    FEISHU_BAN__APP_TOKEN=bascnxxxxxxxxxxxxxxxxxxxxxx
+    FEISHU_BAN__TABLE_ID=tblxxxxxxxxxxxxxx
+    FEISHU_BAN__FIELDS__UID=UID
+    FEISHU_BAN__FIELDS__CATEGORY=类别
     LITTLESKIN_ADMIN_TOKEN=...
     FAILED_RETRY_TIME=2
 
@@ -126,6 +132,37 @@ class API_cloudconfig(BaseModel):
     password: str = ""
 
 
+class API_feishu(BaseModel):
+    """飞书自建应用凭证（用于访问多维表格等云文档）。"""
+
+    app_id: str = ""
+    app_secret: str = ""
+
+
+class FeishuBanFields(BaseModel):
+    """多维表格中封禁记录各逻辑字段对应的列名。
+
+    留空时按内置别名自动探测（见 ``utils.ban_record.FIELD_ALIASES``）；显式填写的值优先。
+    """
+
+    uid: str = ""
+    category: str = ""
+    note: str = ""
+    auto_operator: str = ""
+
+
+class FeishuBanConfig(BaseModel):
+    """飞书多维表格封禁记录表配置。
+
+    多维表格 app_token：URL 形如 https://xxx.feishu.cn/base/<app_token>?table=<table_id>
+    数据表 table_id：URL 中 table= 后的取值
+    """
+
+    app_token: str = ""
+    table_id: str = ""
+    fields: FeishuBanFields = FeishuBanFields()
+
+
 class Setting(BaseModel):
     defined_qq: DefinedQQ = DefinedQQ()
     api_skinrendermc: API_SkinRenderMC = API_SkinRenderMC()
@@ -135,6 +172,8 @@ class Setting(BaseModel):
     api_browserless: API_browserless = API_browserless()
     api_littleskin_origin: API_littleskin_origin = API_littleskin_origin()
     api_cloudconfig: API_cloudconfig = API_cloudconfig()
+    api_feishu: API_feishu = API_feishu()
+    feishu_ban: FeishuBanConfig = FeishuBanConfig()
 
     # 无头浏览器渲染模式：REMOTE=调用远程 Browserless 服务；LOCAL=使用本地 Playwright 渲染
     # 环境变量 BROWSERLESS_MODE（LOCAL 需安装可选依赖 render-local 并执行 playwright install chromium）

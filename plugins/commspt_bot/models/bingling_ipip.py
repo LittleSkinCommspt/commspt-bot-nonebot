@@ -12,6 +12,10 @@ import httpx
 from pydantic import BaseModel
 
 from plugins.commspt_bot.config import S_, VERIFY_CONTENT
+from plugins.commspt_bot.utils.request_logging import external_request
+
+_IPIP_SERVICE = "冰凌 IP 属地 API"
+"""请求日志中的服务名。"""
 
 
 class BingLingIPIP(BaseModel):
@@ -49,9 +53,19 @@ class BingLingIPIP(BaseModel):
         }
         ```
         """
-        # 使用系统证书存储进行 SSL 校验，开启 HTTP/2 访问 API 端点
-        async with httpx.AsyncClient(
-            verify=VERIFY_CONTENT, base_url=S_.api_bingling_ipip.endpoint, http2=True,
-        ) as client:
-            resp = await client.get(f"/{ip}")
-        return cls(**resp.json())
+        endpoint = S_.api_bingling_ipip.endpoint
+        # httpx 的 base_url 合并结果（用于日志地址兜底，与真实请求地址一致）
+        url = f"{endpoint.rstrip('/')}/{ip}"
+        # 请求日志作用域覆盖「请求 + 响应解析」：超时 / 状态码 / JSON 与模型校验失败都会落盘
+        with external_request(_IPIP_SERVICE, url) as scope:
+            # 使用系统证书存储进行 SSL 校验，开启 HTTP/2 访问 API 端点
+            async with httpx.AsyncClient(
+                verify=VERIFY_CONTENT,
+                base_url=endpoint,
+                http2=True,
+            ) as client:
+                resp = await client.get(f"/{ip}")
+            scope.response = resp
+            # 4xx/5xx 单独检测并记录（不改变「照常解析响应体」的既有降级）
+            scope.report_http_status()
+            return cls(**resp.json())

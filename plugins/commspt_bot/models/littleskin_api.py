@@ -24,6 +24,13 @@ from pydantic import (
 )
 
 from plugins.commspt_bot.config import S_, VERIFY_CONTENT
+from plugins.commspt_bot.utils.request_logging import external_request
+
+_LITTLESKIN_ADMIN_USERS_URL = "https://littleskin.cn/api/admin/users"
+"""管理端用户查询接口地址（同时用作请求日志的地址兜底）。"""
+
+_LITTLESKIN_ADMIN_SERVICE = "LittleSkin 管理端 API"
+"""请求日志中的服务名。"""
 
 # 使用 AfterValidator 将时间统一规范化为 Asia/Shanghai 时区的 datetime
 StdTime = Annotated[
@@ -68,17 +75,20 @@ class LittleSkinUser(BaseModel):
     async def query(cls, query_string: str):
         """调用 LittleSkin 管理端 API (/api/admin/users) 查询用户信息。"""
         # 使用配置的管理员 Token 进行 Bearer 鉴权，并开启 HTTP/2
-        async with httpx.AsyncClient(
-            http2=True,
-            headers={"Authorization": f"Bearer {S_.littleskin_admin_token}"},
-            verify=VERIFY_CONTENT,
-        ) as client:
-            api = await client.get("https://littleskin.cn/api/admin/users", params={"q": query_string})
-            # 显式校验状态码：401/403 等 4xx 快速失败（不重试），5xx/429 交由重试层处理
-            api.raise_for_status()
-            if data := api.json()["data"]:
-                return cls(**data[0])
-            return None
+        # 请求日志作用域覆盖「请求 + 响应解析」：状态码校验与 JSON / 模型校验失败都会落盘
+        with external_request(_LITTLESKIN_ADMIN_SERVICE, _LITTLESKIN_ADMIN_USERS_URL) as scope:
+            async with httpx.AsyncClient(
+                http2=True,
+                headers={"Authorization": f"Bearer {S_.littleskin_admin_token}"},
+                verify=VERIFY_CONTENT,
+            ) as client:
+                api = await client.get(_LITTLESKIN_ADMIN_USERS_URL, params={"q": query_string})
+                scope.response = api
+                # 显式校验状态码：401/403 等 4xx 快速失败（不重试），5xx/429 交由重试层处理
+                api.raise_for_status()
+                if data := api.json()["data"]:
+                    return cls(**data[0])
+                return None
 
     @classmethod
     async def qmail_api(cls, qq: int | str):

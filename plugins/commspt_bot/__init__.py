@@ -12,6 +12,7 @@ import nonebot
 from nonebot.plugin import PluginMetadata
 
 from .config import Setting
+from .utils.request_logging import register_startup_hook
 
 __plugin_meta__ = PluginMetadata(
     name="commspt-bot",
@@ -22,6 +23,9 @@ __plugin_meta__ = PluginMetadata(
     supported_adapters={"~onebot.v11"},
     config=Setting,
 )
+
+# 请求日志：进程启动时向当日日志文件追加一行启动标记（父插件注册一次，幂等）
+register_startup_hook()
 
 # 动态加载 plugins/ 目录下的所有业务子插件
 sub_plugins = nonebot.load_plugins(

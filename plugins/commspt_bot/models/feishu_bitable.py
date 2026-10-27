@@ -1,6 +1,16 @@
 """飞书多维表格（Bitable）客户端。
 
 把封禁记录写入多维表格，仅依赖自建应用的 ``tenant_access_token``。
+
+请求日志（``utils.request_logging``）联动：
+- 网络底层（``_send`` / ``_post_token``）与上层（``_get_token`` / ``_request``）都包在
+  ``external_request`` 作用域内，上层把实际响应交给 ``scope.response`` 以取到真实地址与状态；
+- 作用域涵盖 JSON 解析、远端非 0 code、HTTP 4xx、token 响应字段校验，因此凭据错误、
+  无权限、列名错误、分页 / 结构异常等远端失败都会被记录；只有发请求前的本地配置校验
+  （缺 App ID / Secret）不记录；
+- 嵌套作用域与重试由公共模块去重：一次失败只落盘一条，token 过期首次刷新成功后重跑
+  不留失败记录，仍失败时才记录；
+- 日志不改变重试策略（4xx 原样返回、5xx 交给重试层）、幂等 ``client_token`` 与分页行为。
 """
 
 from __future__ import annotations
@@ -14,10 +24,20 @@ from nonebot import logger
 from pydantic import BaseModel
 
 from plugins.commspt_bot.config import S_, VERIFY_CONTENT
+from plugins.commspt_bot.utils.request_logging import external_request
 from plugins.commspt_bot.utils.retry import call_with_retry
 
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
 """飞书开放平台 API 根地址。"""
+
+FEISHU_SERVICE = "飞书 API"
+"""请求日志中的业务接口服务名（与重试层一致）。"""
+
+FEISHU_TOKEN_SERVICE = "飞书 API（获取凭证）"
+"""请求日志中的凭证接口服务名（与重试层一致）。"""
+
+TOKEN_PATH = "/auth/v3/tenant_access_token/internal"
+"""tenant_access_token 接口路径。"""
 
 TOKEN_REFRESH_MARGIN = 300
 """提前刷新 tenant_access_token 的秒数。"""
@@ -117,6 +137,14 @@ class FeishuAPIError(RuntimeError):
         super().__init__(detail)
 
 
+class FeishuConfigError(FeishuAPIError):
+    """发请求前即可判定的本地配置问题（未填 App ID / Secret 等）。
+
+    这类问题没有产生任何网络调用，因此不计入请求日志的失败记录；
+    其余行为（异常类型、提示文本）与 ``FeishuAPIError`` 完全一致。
+    """
+
+
 class FeishuField(BaseModel):
     """多维表格的一个字段（列）。"""
 
@@ -162,7 +190,11 @@ class FeishuBitable:
 
     @staticmethod
     async def _get_token(force_refresh: bool = False) -> str:
-        """获取 tenant_access_token（进程内缓存，提前 5 分钟刷新）。"""
+        """获取 tenant_access_token（进程内缓存，提前 5 分钟刷新）。
+
+        作用域只覆盖「请求 -> 解析 -> 校验 -> 落缓存前的取值」，缓存命中与本地配置校验
+        都在作用域之外：前者没有网络调用，后者属于发请求前的本地配置问题（不记失败）。
+        """
         now = time.time()
         if not force_refresh and _token_cache["token"] and now < _token_cache["expire_at"]:
             return _token_cache["token"]
@@ -170,26 +202,31 @@ class FeishuBitable:
         app_id = S_.api_feishu.app_id
         app_secret = S_.api_feishu.app_secret
         if not app_id or not app_secret:
-            raise FeishuAPIError(
+            # 发请求前的本地配置校验：不产生网络调用，不计入请求日志的失败记录
+            raise FeishuConfigError(
                 -1,
                 "未配置飞书应用凭证",
                 "请在 .env 中填写 API_FEISHU__APP_ID 与 API_FEISHU__APP_SECRET",
             )
 
-        resp = cast(
-            httpx.Response,
-            await call_with_retry("飞书 API（获取凭证）", FeishuBitable._post_token, app_id, app_secret),
-        )
-        payload = resp.json()
-        if int(payload.get("code", -1)) != 0 or resp.status_code >= 400:
-            # 凭证错误属于配置问题，重试无意义，直接抛出可读提示
-            raise FeishuAPIError(
-                int(payload.get("code", -1)),
-                str(payload.get("msg", "")) or f"HTTP {resp.status_code}",
+        address = f"{FEISHU_BASE_URL}{TOKEN_PATH}"
+        # 作用域涵盖「请求 -> JSON 解析 -> 业务 code 判定 -> token 字段校验」
+        with external_request(FEISHU_TOKEN_SERVICE, address, method="POST") as scope:
+            resp = cast(
+                httpx.Response,
+                await call_with_retry(FEISHU_TOKEN_SERVICE, FeishuBitable._post_token, app_id, app_secret),
             )
+            scope.response = resp
+            payload = resp.json()
+            if int(payload.get("code", -1)) != 0 or resp.status_code >= 400:
+                # 凭证错误属于配置问题，重试无意义，直接抛出可读提示
+                raise FeishuAPIError(
+                    int(payload.get("code", -1)),
+                    str(payload.get("msg", "")) or f"HTTP {resp.status_code}",
+                )
 
-        token = payload["tenant_access_token"]
-        expire = int(payload.get("expire", 7200))
+            token = payload["tenant_access_token"]
+            expire = int(payload.get("expire", 7200))
         _token_cache["token"] = token
         _token_cache["expire_at"] = now + max(60, expire - TOKEN_REFRESH_MARGIN)
         logger.debug(f"飞书 tenant_access_token 已刷新，有效期 {expire} 秒")
@@ -201,28 +238,34 @@ class FeishuBitable:
 
         5xx 以 ``HTTPStatusError`` 抛出，交由 ``call_with_retry`` 判定为瞬时故障重试；
         4xx 原样返回，由上层解析飞书业务错误码（这类错误重试无意义）。
+        请求日志作用域包住实际 HTTP 调用，``scope.response`` 记录本次实际响应。
         """
         async with cls._client() as client:
-            resp = await client.request(
-                method,
-                f"{FEISHU_BASE_URL}{path}",
-                headers={"Authorization": f"Bearer {token}"},
-                **kwargs,
-            )
-        if resp.status_code >= 500:
-            resp.raise_for_status()
+            with external_request(FEISHU_SERVICE, f"{FEISHU_BASE_URL}{path}", method=method) as scope:
+                resp = await client.request(
+                    method,
+                    f"{FEISHU_BASE_URL}{path}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    **kwargs,
+                )
+                scope.response = resp
+                # 5xx 在网络边界抛出（保持原有重试策略：交由 call_with_retry 判定）
+                if resp.status_code >= 500:
+                    resp.raise_for_status()
         return resp
 
     @staticmethod
     async def _post_token(app_id: str, app_secret: str) -> httpx.Response:
         """请求 tenant_access_token，5xx 交由重试层处理。"""
         async with FeishuBitable._client() as client:
-            resp = await client.post(
-                f"{FEISHU_BASE_URL}/auth/v3/tenant_access_token/internal",
-                json={"app_id": app_id, "app_secret": app_secret},
-            )
-        if resp.status_code >= 500:
-            resp.raise_for_status()
+            with external_request(FEISHU_TOKEN_SERVICE, f"{FEISHU_BASE_URL}{TOKEN_PATH}", method="POST") as scope:
+                resp = await client.post(
+                    f"{FEISHU_BASE_URL}{TOKEN_PATH}",
+                    json={"app_id": app_id, "app_secret": app_secret},
+                )
+                scope.response = resp
+                if resp.status_code >= 500:
+                    resp.raise_for_status()
         return resp
 
     @classmethod
@@ -232,33 +275,45 @@ class FeishuBitable:
         网络层失败（超时、连接错误、5xx）由 ``call_with_retry`` 按 ``FAILED_RETRY_TIME``
         重试；token 失效（99991663）时强制刷新后重跑一次。``kwargs`` 在进入重试前即已
         固化，因此写入请求的 ``client_token`` 在重试之间保持不变，不会产生重复记录。
-        """
-        for attempt in (1, 2):
-            token = await cls._get_token(force_refresh=attempt == 2)
-            resp = cast(
-                httpx.Response,
-                await call_with_retry("飞书 API", cls._send, method, path, token, **kwargs),
-            )
 
-            if resp.status_code >= 400:
-                err = _api_error_from(resp)
-                if err.code == 99991663 and attempt == 1:
-                    logger.warning("飞书 token 失效，正在刷新后重试")
+        整个「请求 + 解析」都在 ``external_request`` 作用域内：远端非 0 code、HTTP 4xx、
+        JSON 解析失败都会记录一次失败；token 过期首次刷新成功后重跑成功则不落盘。
+        ``FeishuConfigError``（缺失 App ID / Secret 等发请求前的本地配置问题）不计入日志。
+        """
+        address = f"{FEISHU_BASE_URL}{path}"
+        with external_request(
+            FEISHU_SERVICE,
+            address,
+            method=method,
+            non_failures=(FeishuConfigError,),
+        ) as scope:
+            for attempt in (1, 2):
+                token = await cls._get_token(force_refresh=attempt == 2)
+                resp = cast(
+                    httpx.Response,
+                    await call_with_retry(FEISHU_SERVICE, cls._send, method, path, token, **kwargs),
+                )
+                scope.response = resp
+
+                if resp.status_code >= 400:
+                    err = _api_error_from(resp)
+                    if err.code == 99991663 and attempt == 1:
+                        logger.warning("飞书 token 失效，正在刷新后重试")
+                        _token_cache["token"] = ""
+                        continue
+                    raise err
+
+                payload = resp.json()
+                code = int(payload.get("code", -1))
+                if code == 99991663 and attempt == 1:
+                    logger.warning("飞书 token 失效（响应体内），正在刷新后重试")
                     _token_cache["token"] = ""
                     continue
-                raise err
+                if code != 0:
+                    raise FeishuAPIError(code, str(payload.get("msg", "")))
+                return payload.get("data") or {}
 
-            payload = resp.json()
-            code = int(payload.get("code", -1))
-            if code == 99991663 and attempt == 1:
-                logger.warning("飞书 token 失效（响应体内），正在刷新后重试")
-                _token_cache["token"] = ""
-                continue
-            if code != 0:
-                raise FeishuAPIError(code, str(payload.get("msg", "")))
-            return payload.get("data") or {}
-
-        raise FeishuAPIError(99991663, "tenant_access_token 刷新后仍然无效")
+            raise FeishuAPIError(99991663, "tenant_access_token 刷新后仍然无效")
 
     async def fetch_fields(self) -> list[FeishuField]:
         """列出数据表全部字段（含单选/多选的选项名称），自动翻页。"""

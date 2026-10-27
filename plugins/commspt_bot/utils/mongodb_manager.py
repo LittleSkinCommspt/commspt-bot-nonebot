@@ -5,6 +5,13 @@
 主要接口：
 - write_uid_db: 写入或更新 QQ 与 LittleSkin UID 的映射记录
 - get_uid_db: 根据 QQ 号查询关联的 LittleSkin UID
+
+请求日志（``utils.request_logging``）联动：
+- 每个 Mongo 网络边界（``find_one`` / ``update_one`` / ``insert_one``）都包在
+  ``external_request`` 作用域内，按操作名记录失败；地址为连接串 + 库/集合元数据
+  （连接串里的凭据由公共模块脱敏）；
+- 未使用的 ``get_uid_db`` 同样覆盖，避免后续启用时成为日志盲区；
+- 作用域不覆盖业务流程，异常原样透传，连接创建 / 关闭与重试策略均保持不变。
 """
 
 from datetime import datetime
@@ -13,6 +20,13 @@ import pytz
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from plugins.commspt_bot.config import S_
+from plugins.commspt_bot.models.mongodb_data import (
+    MONGO_COLLECTION,
+    MONGO_DATABASE,
+    MONGO_SERVICE,
+    mongo_failure_address,
+)
+from plugins.commspt_bot.utils.request_logging import external_request
 
 
 async def write_uid_db(uid: int | str, qq: int | str):
@@ -23,15 +37,20 @@ async def write_uid_db(uid: int | str, qq: int | str):
 
     # 客户端生命周期管理：按需创建异步连接，并在操作完成后显式关闭释放连接池
     mongo = AsyncIOMotorClient(S_.db_mongo.url)
-    coll = mongo["commspt-bot"]["uid"]
-    i = await coll.find_one({"qq": qq})
+    coll = mongo[MONGO_DATABASE][MONGO_COLLECTION]
+    address = mongo_failure_address()
+
+    with external_request(MONGO_SERVICE, address, method="find_one"):
+        i = await coll.find_one({"qq": qq})
 
     r = {"uid": uid, "qq": qq, "last_update": datetime.now(tz=pytz.UTC).timestamp()}
 
     if i:
-        await coll.update_one({"qq": qq}, {"$set": r})
+        with external_request(MONGO_SERVICE, address, method="update_one"):
+            await coll.update_one({"qq": qq}, {"$set": r})
     else:
-        await coll.insert_one(r)
+        with external_request(MONGO_SERVICE, address, method="insert_one"):
+            await coll.insert_one(r)
 
     # 操作结束显式关闭 Motor 客户端连接
     mongo.close()
@@ -44,8 +63,10 @@ async def get_uid_db(qq: int | str) -> int | None:
 
     # 客户端生命周期管理：按需创建异步连接，并在查询完成后显式关闭
     mongo = AsyncIOMotorClient(S_.db_mongo.url)
-    coll = mongo["commspt-bot"]["uid"]
-    i = await coll.find_one({"qq": qq})
+    coll = mongo[MONGO_DATABASE][MONGO_COLLECTION]
+
+    with external_request(MONGO_SERVICE, mongo_failure_address(), method="find_one"):
+        i = await coll.find_one({"qq": qq})
 
     mongo.close()
 

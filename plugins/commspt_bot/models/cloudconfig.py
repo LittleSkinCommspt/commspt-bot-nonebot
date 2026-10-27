@@ -15,6 +15,13 @@ import httpx
 from pydantic import BaseModel, Field
 
 from plugins.commspt_bot.config import S_, VERIFY_CONTENT
+from plugins.commspt_bot.utils.request_logging import external_request
+
+_CLOUDCONFIG_SERVICE = "云控配置"
+"""请求日志中的服务名。"""
+
+_CLOUDCONFIG_PATH = "/bot/"
+"""云控配置接口路径。"""
 
 
 class CloudConfig(BaseModel):
@@ -34,12 +41,20 @@ class CloudConfig(BaseModel):
     @classmethod
     async def fetch(cls) -> Self:
         """请求 {S_.api_cloudconfig.endpoint}/bot/ 获取最新云控配置。"""
-        # 启用 HTTP/2 与自动重定向请求云控服务端点
-        async with httpx.AsyncClient(
-            http2=True,
-            base_url=S_.api_cloudconfig.endpoint,
-            follow_redirects=True,
-            verify=VERIFY_CONTENT,
-        ) as client:
-            resp = await client.get("/bot/")
+        endpoint = S_.api_cloudconfig.endpoint
+        # httpx 的 base_url 合并结果（用于日志地址兜底，与真实请求地址一致）
+        url = f"{endpoint.rstrip('/')}{_CLOUDCONFIG_PATH}"
+        # 请求日志作用域覆盖「请求 + 响应解析」：状态码、JSON 与模型校验失败都会被记录
+        with external_request(_CLOUDCONFIG_SERVICE, url) as scope:
+            # 启用 HTTP/2 与自动重定向请求云控服务端点
+            async with httpx.AsyncClient(
+                http2=True,
+                base_url=endpoint,
+                follow_redirects=True,
+                verify=VERIFY_CONTENT,
+            ) as client:
+                resp = await client.get(_CLOUDCONFIG_PATH)
+            scope.response = resp
+            # 4xx/5xx 单独检测并记录（不改变「照常解析响应体」的既有降级）
+            scope.report_http_status()
             return cls(**resp.json())

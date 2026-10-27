@@ -6,3 +6,12 @@
 admin_list:
   - 123
   - 456
+
+# 请求日志：把项目对外部服务（HTTP / MongoDB / SDK）请求的失败按天追加写入文本文件，
+# 仅用于排障，不影响业务；详见 README「请求日志」小节。
+request_logging:
+  # 是否启用。设为 false 时不创建日志目录、不写任何文件。
+  enabled: true
+  # 日志目录。相对路径按项目根目录解析，也可填写绝对路径。
+  # 每日子文件名为 YYYY-MM-DD.log（Asia/Shanghai），只追加、不轮转。
+  directory: ./logs/commspt-bot/

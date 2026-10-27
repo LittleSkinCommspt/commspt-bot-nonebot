@@ -12,6 +12,8 @@
   不消耗重试次数；429 与 5xx 视为可重试。
 - 仅用于外部网络服务；QQ 协议端调用与渲染类服务（SkinRenderMC / Browserless / Playwright）
   不参与重试。
+- 请求日志（``utils.request_logging``）联动：中间失败只打控制台，最终失败只落盘一次；
+  重试后成功不记为失败文件。日志实现不改变重试时序、异常类型或异常内容。
 
 主要接口：
 - call_with_retry: 以统一重试策略调用协程函数
@@ -26,6 +28,7 @@ from nonebot import logger
 from pymongo.errors import PyMongoError
 
 from plugins.commspt_bot.config import S_
+from plugins.commspt_bot.utils.request_logging import retry_log_scope
 
 RETRY_DELAY_SECONDS = 1.0
 """重试之间的固定等待秒数。"""
@@ -93,22 +96,32 @@ async def call_with_retry(
     attempts = 1 + max(0, S_.failed_retry_time)
 
     for attempt in range(1, attempts + 1):
-        try:
-            result = await func(*args, **kwargs)
-        except Exception as exc:
-            if not is_retryable(exc, non_retryable):
-                # 业务结果（查无此人等）静默重抛；确属请求失败的记录原因但不重试
-                if not (non_retryable and isinstance(exc, non_retryable)):
-                    logger.warning(f"{_LOG_PREFIX} {service} 请求失败（不重试）：{describe_error(exc)}")
-                raise
-            if attempt >= attempts:
-                logger.error(
-                    f"{_LOG_PREFIX} {service} 连续 {attempts} 次请求失败，放弃重试：{describe_error(exc)}",
-                )
-                raise
-            logger.warning(f"{_LOG_PREFIX} {service} 第 {attempt}/{attempts} 次请求失败：{describe_error(exc)}")
-            await _retry_sleep()
-        else:
-            if attempt > 1:
-                logger.info(f"{_LOG_PREFIX} {service} 第 {attempt} 次尝试成功")
-            return result
+        # 每次尝试进入重试日志范围：中间失败只在控制台，最终失败仅落盘一次
+        with retry_log_scope(attempt, attempts, service=service) as log_scope:
+            try:
+                result = await func(*args, **kwargs)
+            except Exception as exc:
+                if not is_retryable(exc, non_retryable):
+                    if non_retryable and isinstance(exc, non_retryable):
+                        # 业务结果（查无此人等）：不记失败，外层作用域也不记录
+                        log_scope.mark_non_failure(exc)
+                    else:
+                        logger.warning(f"{_LOG_PREFIX} {service} 请求失败（不重试）：{describe_error(exc)}")
+                        # 确定不会再重试：唯一落盘点，记录带实际尝试次数
+                        log_scope.mark_final(exc)
+                    raise
+                if attempt >= attempts:
+                    logger.error(
+                        f"{_LOG_PREFIX} {service} 连续 {attempts} 次请求失败，放弃重试：{describe_error(exc)}",
+                    )
+                    # 重试耗尽：唯一落盘点（沿用最内层网络点记录的实际地址 / 服务）
+                    log_scope.mark_final(exc)
+                    raise
+                logger.warning(f"{_LOG_PREFIX} {service} 第 {attempt}/{attempts} 次请求失败：{describe_error(exc)}")
+            else:
+                if attempt > 1:
+                    logger.info(f"{_LOG_PREFIX} {service} 第 {attempt} 次尝试成功")
+                return result
+
+        # 确认仍要重试后才等待（保持原有重试时序：失败 → 等待 → 下一次尝试）
+        await _retry_sleep()

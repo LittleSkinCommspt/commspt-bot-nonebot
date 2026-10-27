@@ -16,6 +16,10 @@ from pydantic import BaseModel, model_validator
 from pydantic.fields import Field
 
 from plugins.commspt_bot.config import VERIFY_CONTENT
+from plugins.commspt_bot.utils.request_logging import external_request
+
+_CSL_SERVICE = "LittleSkin CSL API"
+"""请求日志中的服务名。"""
 
 
 class CustomSkinLoaderApi(BaseModel):
@@ -65,8 +69,12 @@ class CustomSkinLoaderApi(BaseModel):
     @classmethod
     async def get(cls, api_root: str, username: str):
         """请求 {api_root}/{username}.json 获取玩家 CSL 材质配置。"""
-        async with httpx.AsyncClient(base_url=api_root, verify=VERIFY_CONTENT) as client:
-            resp = (await client.get(f"{username}.json")).raise_for_status().json()
+        # 请求日志作用域覆盖「请求 + 响应解析」：状态码校验、JSON 与模型校验失败都会落盘
+        with external_request(_CSL_SERVICE, api_root) as scope:
+            async with httpx.AsyncClient(base_url=api_root, verify=VERIFY_CONTENT) as client:
+                response = await client.get(f"{username}.json")
+                scope.response = response
+                resp = response.raise_for_status().json()
             if not resp:
                 logger.warning(f"Player {username} not found.")
                 return None

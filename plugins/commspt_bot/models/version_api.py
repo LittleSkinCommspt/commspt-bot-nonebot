@@ -24,6 +24,16 @@ from pydantic.fields import Field
 from pydantic.networks import AnyHttpUrl
 
 from plugins.commspt_bot.config import VERIFY_CONTENT
+from plugins.commspt_bot.utils.request_logging import external_request
+
+_CSL_RELEASES_URL = "https://api.github.com/repos/CustomSkinLoader/CustomSkinLoader/releases/latest"
+"""CustomSkinLoader 最新 Release 接口地址。"""
+
+_AUTHLIB_INJECTOR_URL = "https://authlib-injector.yushi.moe/artifact/latest.json"
+"""authlib-injector 最新制品接口地址。"""
+
+_LIBERICA_RELEASES_URL = "https://api.bell-sw.com/v1/liberica/releases"
+"""BellSoft Liberica JDK 发行版本接口地址。"""
 
 
 class CustomSkinLoaderLatest(BaseModel):
@@ -53,12 +63,12 @@ class CustomSkinLoaderLatest(BaseModel):
         Returns:
             CustomSkinLoaderLatest: CustomSkinLoader 最新版本信息
         """
-        async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
-            return cls(
-                **(await client.get("https://api.github.com/repos/CustomSkinLoader/CustomSkinLoader/releases/latest"))
-                .raise_for_status()
-                .json(),
-            )
+        # 请求日志作用域覆盖「请求 + 响应解析」：状态码与 JSON / 模型校验失败都会落盘
+        with external_request("GitHub Releases API", _CSL_RELEASES_URL) as scope:
+            async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
+                response = await client.get(_CSL_RELEASES_URL)
+                scope.response = response
+                return cls(**response.raise_for_status().json())
 
 
 class AuthlibInjectorLatest(BaseModel):
@@ -84,12 +94,12 @@ class AuthlibInjectorLatest(BaseModel):
         Returns:
             AuthlibInjectorLatest: Authlib-Injector 最新版本信息
         """
-        async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
-            return cls(
-                **(await client.get("https://authlib-injector.yushi.moe/artifact/latest.json"))
-                .raise_for_status()
-                .json()
-            )
+        # 请求日志作用域覆盖「请求 + 响应解析」：状态码与 JSON / 模型校验失败都会落盘
+        with external_request("authlib-injector 制品 API", _AUTHLIB_INJECTOR_URL) as scope:
+            async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
+                response = await client.get(_AUTHLIB_INJECTOR_URL)
+                scope.response = response
+                return cls(**response.raise_for_status().json())
 
 
 class LibericaJavaLatest(BaseModel):
@@ -147,14 +157,9 @@ class LibericaJavaLatest(BaseModel):
 
         # 将下划线命名参数转换为 API 接收的中划线命名参数（如 feature_version -> feature-version）
         kwargs = {key.replace("_", "-"): value for key, value in kwargs.items()}
-        async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
-            return libereca_releases.validate_python(
-                (
-                    await client.get(
-                        "https://api.bell-sw.com/v1/liberica/releases",
-                        params=kwargs,
-                    )
-                )
-                .raise_for_status()
-                .json(),
-            )
+        # 请求日志作用域覆盖「请求 + 响应解析」：状态码与 JSON / 模型校验失败都会落盘
+        with external_request("BellSoft Liberica API", _LIBERICA_RELEASES_URL) as scope:
+            async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
+                response = await client.get(_LIBERICA_RELEASES_URL, params=kwargs)
+                scope.response = response
+                return libereca_releases.validate_python(response.raise_for_status().json())

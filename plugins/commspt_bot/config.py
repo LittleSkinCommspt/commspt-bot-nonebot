@@ -36,6 +36,10 @@
       - 10001
       - 10002
 
+    request_logging:
+      enabled: true
+      directory: ./logs/commspt-bot/    # 相对路径按 PROJECT_ROOT 解析
+
 3. 简易问答内容文件：静态问答（simple_response）所用的 JSON 内容文件，
    默认位于项目根目录的 commspt_simple_response.json（可通过环境变量 COMMSPT_SIMPLE_RESPONSE_FILE 覆盖路径）。
 
@@ -82,7 +86,9 @@ TEMPLATE_DIR = BASE_DIR / "templates"
 CONFIG_FILE = Path(os.environ.get("COMMSPT_CONFIG_FILE", str(PROJECT_ROOT / "config.yml")))
 
 # 简易问答（simple_response）内容文件路径，默认位于项目根目录，可用环境变量覆盖
-SIMPLE_RESPONSE_FILE = Path(os.environ.get("COMMSPT_SIMPLE_RESPONSE_FILE", str(PROJECT_ROOT / "commspt_simple_response.json")))
+SIMPLE_RESPONSE_FILE = Path(
+    os.environ.get("COMMSPT_SIMPLE_RESPONSE_FILE", str(PROJECT_ROOT / "commspt_simple_response.json"))
+)
 
 # 使用操作系统证书存储，并设置 ALPN 以协商 HTTP/2。
 VERIFY_CONTENT = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -189,6 +195,27 @@ class Setting(BaseModel):
     failed_retry_time: int = 2
 
 
+class RequestLoggingConfig(BaseModel):
+    """请求日志（config.yml 的 ``request_logging`` 块）。
+
+    仅用于排障：把项目对外部服务的请求失败按天追加写入文本文件，
+    不参与任何业务判断，写失败也不影响业务。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    # 是否启用；关闭时不创建日志目录、不写任何文件
+    enabled: bool = True
+
+    # 日志目录：相对路径按项目根目录（PROJECT_ROOT）解析，也可填绝对路径
+    directory: str = "./logs/commspt-bot/"
+
+    def resolved_directory(self) -> Path:
+        """返回解析后的日志目录绝对路径（相对路径以 PROJECT_ROOT 为基准）。"""
+        path = Path(self.directory).expanduser()
+        return path if path.is_absolute() else PROJECT_ROOT / path
+
+
 class AppConfig(BaseModel):
     """config.yml 应用配置模型。"""
 
@@ -196,6 +223,9 @@ class AppConfig(BaseModel):
 
     # 管理员 QQ 列表（可执行 %mute / %check / do 等管理员命令）
     admin_list: list[int] = []
+
+    # 请求日志（排障用，默认开启）
+    request_logging: RequestLoggingConfig = RequestLoggingConfig()
 
 
 def _load_app_config() -> AppConfig:

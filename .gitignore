@@ -20,6 +20,9 @@ cache/
 join-announcement.txt
 .join-announcement.txt
 
+# 请求日志输出目录（config.yml 的 request_logging.directory 默认值）
+/logs/
+
 # 本地 Browserless 渲染资源（人工放入，不入库）
 assets/browserless/
 

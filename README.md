@@ -12,6 +12,7 @@ LittleSkin 的社区支持 QQ 机器人，主要基于 [nonebot/nonebot2](https:
 - **外部服务失败重试**：`FAILED_RETRY_TIME` 控制重试次数（默认 2，即合计最多 3 次请求），失败后回复统一提示「处理你的请求时发生了一些问题」并记录各网络服务的中文失败日志
 - **入群审批双入口**：既可在通知消息下回复 `do accept` / `do reject` 文字命令审批，也可直接对通知消息贴 👍 / 👎 表情快捷审批（见[入群审批](#join-approval)）
 - **封禁记录上云**：`&banlog` 一条命令把封禁信息写入飞书多维表格，类别走表格选项校验，支持多选与备注（见[飞书封禁记录](#feishu-ban-record)）
+- **请求日志**：把项目对外部 HTTP / MongoDB / SDK 请求的**失败**按天追加写入文本文件，仅用于排障（`config.yml` 的 `request_logging`，默认开启，见[请求日志](#request-logging)）
 
 ## 目录结构
 *此结构可以表达大部分框架原理，但可能不是实时更新*
@@ -77,9 +78,10 @@ cp .env.example .env                # 或 .env.prod
 cp config.yml.example config.yml
 ```
 
-按需填写：群号（`DEFINED_QQ__*`）、管理员列表（`config.yml` 中的 `admin_list`）、外部 API 地址、
+按需填写：群号（`DEFINED_QQ__*`）、管理员列表（`config.yml` 中的 `admin_list`）、请求日志开关与目录
+（`config.yml` 中的 `request_logging`，见[请求日志](#request-logging)）、外部 API 地址、
 `LITTLESKIN_ADMIN_TOKEN`、`DB_MONGO__URL` 等。**简单与嵌套配置从 `.env` 读取（`config.py` 的 `Setting` 只定义 schema）；
-结构化列表配置从 `config.yml` 读取（默认位于项目根目录，可用 `COMMSPT_CONFIG_FILE` 覆盖路径）。**
+结构化配置（列表 / 映射块）从 `config.yml` 读取（默认位于项目根目录，可用 `COMMSPT_CONFIG_FILE` 覆盖路径）。**
 简易问答（`&help` / `&faq` / `&pay` 等）的回复内容在项目根目录的 `commspt_simple_response.json` 中编辑，可通过 `COMMSPT_SIMPLE_RESPONSE_FILE` 环境变量覆盖路径。
 静态资源（图片、字体）默认存放在项目根目录的 `assets/` 下，可通过 `COMMSPT_ASSETS_DIR` 环境变量覆盖。
 
@@ -94,6 +96,7 @@ cp config.yml.example config.yml
 | `DEFINED_QQ__NOTIFICATION_CHANNEL` | 通知群号（入群欢迎通知） |
 | `DEFINED_QQ__DEV_GROUP` | 开发群群号 |
 | `admin_list`（`config.yml`） | 管理员 QQ 列表（YAML 数组） |
+| `request_logging`（`config.yml`） | 请求日志开关与目录：`enabled`（默认 `true`）、`directory`（默认 `./logs/commspt-bot/`），见[请求日志](#request-logging) |
 | `LITTLESKIN_ADMIN_TOKEN` | LittleSkin Admin API Token |
 | `DB_MONGO__URL` | MongoDB 连接串（QQ↔UID 映射） |
 | `API_BROWSERLESS__ENDPOINT` | browserless 截图服务（`BROWSERLESS_MODE=REMOTE` 时使用） |
@@ -132,6 +135,87 @@ UID / 积分 / 邮箱 / QQ / 时间戳等编号类字段同样走 MiSans Bold，
 ### 用户信息卡主题
 
 `USER_CARD_AUTO_THEME` 默认开启：按 `Asia/Shanghai` 时区，07:00（含）至 19:00（不含）使用浅色，其余时间使用深色，与服务器本地时区无关。设为 `false` 后，完全恢复被查询账户的 `is_dark_mode` 偏好。该开关只影响用户信息卡，不修改账户数据，也不影响其他图卡。
+
+<a id="request-logging"></a>
+
+### 请求日志
+
+把项目**对外部服务请求的失败**（HTTP / MongoDB / SDK）按天追加写入文本文件，方便事后排障。**只记录失败**：成功的外部查询不落盘，也没有独立的命令操作审计流水——操作者与命令信息只是附加在失败记录上的上下文。日志不影响任何业务结果。
+
+#### 配置（`config.yml`）
+
+请求日志使用 YAML 配置（`config.yml`），**不是** `.env` 环境变量：
+
+```yaml
+request_logging:
+  enabled: true                      # 是否启用，默认 true
+  directory: ./logs/commspt-bot/     # 日志目录，默认 ./logs/commspt-bot/
+```
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `enabled` | `true` | 设为 `false` 时不创建日志目录、不写任何文件 |
+| `directory` | `./logs/commspt-bot/` | 日志目录。相对路径按**项目根目录**解析，也可以填绝对路径 |
+
+- 修改配置后需要**重启**机器人生效（不存在文件监听）。
+- 默认目录 `logs/` 已在 `.gitignore` 中忽略，不会误入库。
+
+#### 文件与格式
+
+- 每自然日一个文件：`<directory>/YYYY-MM-DD.log`，日期按 **Asia/Shanghai** 计算（与服务器本地时区无关）。
+- 时间戳带毫秒与时区，形如 `2026-01-02 03:04:05.678 +08:00`。
+- 进程启动时向当日文件追加一行启动标记：`--- 2026-01-02 03:04:05.678 +08:00 启动 ---`（即 `--- <详细时间> 启动 ---`），因此同一个文件里能区分多次运行。
+- 日切（跨天）只切换到新的目标文件，**不碰历史文件**。
+- 只做 **append**：不 truncate、不 delete、不 rotate，也没有自动保留期（retention）。旧文件请自行归档或清理。
+
+> 这里的「只追加」是**代码层**的写入行为约定（打开文件即 append 模式），不是操作系统级的防篡改或只追加文件系统保证；有权限的人仍然可以直接改写日志文件。
+
+每条失败记录是**单行**，字段之间以 ` | ` 分隔，空字段省略：
+
+```
+2026-01-02 03:04:05.678 +08:00 | [失败] | 服务=LittleSkin 管理端 API | 方法=GET | 尝试=3/3 | 地址=https://example.com/api/users/123 | 状态=500 | 原因=HTTP 500 响应错误 | 详情=HTTPStatusError: ... | 操作者=群名片 | QQ=10001 | 角色=管理员 | 群=123456 | 命令=&user 123
+```
+
+字段固定为：时间戳、`[失败]`、`服务`、`方法`、`尝试=N/M`（参与重试时才有）、`地址`、`状态`、`原因`、`详情`，随后是操作者上下文字段（见下文）。动态文本中的换行等控制字符会被转义，保证一条记录只占一行。
+
+#### 记录范围
+
+覆盖项目**对外部服务请求的失败**：
+
+- **外部 HTTP / SDK**：玩家与 UID 查询（Yggdrasil、LittleSkin Admin API）、用户信息卡取数、皮肤渲染、版本查询（CSL / Authlib / Liberica Java）、飞书多维表格、云控配置、IP 归属地；
+- **MongoDB**：QQ↔UID 映射等读写。
+
+**不记录**：
+
+- 成功的外部查询与成功的命令执行（没有操作审计日志，只有失败记录）；
+- OneBot 协议端的 API 调用失败（发送消息、撤回、禁言、贴表情、审批等）——由协议端自身负责，本项目不采集；
+- 纯本地错误（参数解析失败、本地文件读取失败、模板渲染异常等不涉及外部调用的失败）。
+
+#### 操作者与触发上下文
+
+失败记录会附带事件自带的上下文（拿不到时标注为**系统**），用于定位是谁触发了这次外部调用：
+
+- **操作者显示名**：取事件自带的 `card` > `nickname` > QQ 号兜底，**不额外调用任何接口**去补全；
+- **操作者 QQ 号**与**角色**（管理员 / 普通用户）；
+- **群号**；
+- **实际命令**（用户实际发出的命令原文，保留 @ 等消息段）。
+
+**入群申请**（`request_type=group`）的失败记录字段为：`触发=入群申请(主群)` 或 `触发=入群申请(茶馆)`（其他群显示 `触发=入群申请(群<群号>)`）、`申请人=<QQ>`、`群=<群号>`、`所填UID=<申请留言中的答案>`；申请人昵称没有独立字段，可用时体现在上面的 `操作者=`（同样取事件自带的 `card` / `nickname`）。入群通知（`group_increase`）则记为 `触发=入群通知` + `新成员=<QQ>` + `群=<群号>`。**不记录邀请人 / 来源信息。**
+
+#### 敏感值脱敏
+
+日志中的 URL 与凭证类敏感值都会脱敏：URL 的 userinfo（`user:pass@`）、敏感查询参数与 fragment（`token` / `access_token` / `sign` / `password` 等）、`Authorization` / `Bearer` 类头部值、飞书多维表格路径中的 `app_token`，以及配置中的秘密值（`LITTLESKIN_ADMIN_TOKEN`、飞书 `app_secret` / `app_token`、云控 `password`、MongoDB 连接串凭证）在任意文本中都会被替换为 `***`。脱敏只覆盖日志输出，不改变任何实际请求。
+
+#### 失败与重试
+
+- 同一次逻辑操作内的失败**只落盘一次**（嵌套调用不会重复记录）；
+- 重试的中间失败只在控制台告警，**最终失败才写日志文件**；**重试后成功则完全不写失败记录**；
+- 「查无此人」等业务性结果不算请求失败，不落盘；
+- 日志实现**不改变现有重试策略**（`FAILED_RETRY_TIME` 的语义与生效范围保持不变，见上方配置项说明）。
+
+#### 写入失败的兜底
+
+日志写入本身失败（目录不可写、磁盘满等）时只在控制台打印一条告警，**不影响原业务**：业务照常返回结果，不会因为日志失败而报错或中断。
 
 <a id="feishu-ban-record"></a>
 

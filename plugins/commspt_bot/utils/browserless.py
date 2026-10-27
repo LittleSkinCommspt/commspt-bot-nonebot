@@ -20,6 +20,10 @@ from nonebot import get_driver, logger
 from pydantic import BaseModel
 
 from plugins.commspt_bot.config import ASSETS_DIR, S_, TEMPLATE_DIR, VERIFY_CONTENT
+from plugins.commspt_bot.utils.request_logging import external_request
+
+_BROWSERLESS_SERVICE = "Browserless 截图服务"
+"""请求日志中的服务名（仅用于 REMOTE 后端的服务端请求）。"""
 
 # 模板资源基址：REMOTE 走内网 CDN；LOCAL 走本地 assets/browserless（file:// 便于 set_content 解析，
 # 因 set_content 无 baseURL，相对路径无法解析）。LOCAL 只需字体一个文件，由人工放入该目录（已 gitignore）。
@@ -174,43 +178,48 @@ async def _screenshot_remote(
     transparent: bool = False,
 ) -> bytes:
     """调用远程 Browserless 服务渲染网页为 PNG 图片字节流。"""
-    async with httpx.AsyncClient(
-        base_url=S_.api_browserless.endpoint,
-        verify=VERIFY_CONTENT,
-        http2=True,
-        timeout=20,
-    ) as client:
-        resp = await client.post(
-            "/screenshot",
-            params={
-                # Chromium 启动参数：忽略证书错误以兼容自签名环境，并开启无头模式
-                "launch": json.dumps(
-                    {
-                        "args": ["--ignore-certificate-errors"],
-                        "ignoreHTTPSErrors": True,
-                        "headless": True,
-                    },
-                ),
-            },
-            json={
-                "html": html,
-                "options": {"type": "png", "fullPage": full_page, "omitBackground": transparent},
-                # 视口配置：指定截图分辨率、移动端视口模拟及设备像素比（高 DPI 保证渲染清晰度）
-                "viewport": {
-                    "width": width,
-                    "height": height,
-                    "isMobile": is_mobile,
-                    "deviceScaleFactor": device_scale_factor,
+    endpoint = S_.api_browserless.endpoint
+    # 请求日志作用域只覆盖「本服务自己发出的这一次请求」：不采集 Browserless 服务端
+    # 内部拉取页面资源的行为；LOCAL（Playwright）后端纯本地，不进入日志。
+    with external_request(_BROWSERLESS_SERVICE, f"{endpoint.rstrip('/')}/screenshot", method="POST") as scope:
+        async with httpx.AsyncClient(
+            base_url=endpoint,
+            verify=VERIFY_CONTENT,
+            http2=True,
+            timeout=20,
+        ) as client:
+            resp = await client.post(
+                "/screenshot",
+                params={
+                    # Chromium 启动参数：忽略证书错误以兼容自签名环境，并开启无头模式
+                    "launch": json.dumps(
+                        {
+                            "args": ["--ignore-certificate-errors"],
+                            "ignoreHTTPSErrors": True,
+                            "headless": True,
+                        },
+                    ),
                 },
-                # 请求头配置与页面加载策略：设置中文语言偏好，并等待网络连接空闲（networkidle0）确保静态资源加载完成
-                "setExtraHTTPHeaders": {"Accept-Language": "zh-CN,en;q=0.9"},
-                "gotoOptions": {"waitUntil": ["networkidle0"]},
-                "waitForFunction": {"fn": _READY, "timeout": (_FONT_TIMEOUT_SECONDS + 5) * 1000},
-            },
-        )
-        # raise exception if status is bad
-        resp.raise_for_status()
-        return resp.content
+                json={
+                    "html": html,
+                    "options": {"type": "png", "fullPage": full_page, "omitBackground": transparent},
+                    # 视口配置：指定截图分辨率、移动端视口模拟及设备像素比（高 DPI 保证渲染清晰度）
+                    "viewport": {
+                        "width": width,
+                        "height": height,
+                        "isMobile": is_mobile,
+                        "deviceScaleFactor": device_scale_factor,
+                    },
+                    # 请求头配置与页面加载策略：设置中文语言偏好，并等待网络连接空闲（networkidle0）确保静态资源加载完成
+                    "setExtraHTTPHeaders": {"Accept-Language": "zh-CN,en;q=0.9"},
+                    "gotoOptions": {"waitUntil": ["networkidle0"]},
+                    "waitForFunction": {"fn": _READY, "timeout": (_FONT_TIMEOUT_SECONDS + 5) * 1000},
+                },
+            )
+            scope.response = resp
+            # raise exception if status is bad
+            resp.raise_for_status()
+            return resp.content
 
 
 async def screenshot(
@@ -236,9 +245,7 @@ async def screenshot(
     html = template.render({**base_ctx, "transparent": transparent, **assets})
 
     if S_.browserless_mode == "LOCAL":
-        return await _screenshot_local(
-            html, width, height, is_mobile, device_scale_factor, full_page, transparent
-        )
+        return await _screenshot_local(html, width, height, is_mobile, device_scale_factor, full_page, transparent)
     return await _screenshot_remote(html, width, height, is_mobile, device_scale_factor, full_page, transparent)
 
 

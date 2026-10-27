@@ -27,6 +27,10 @@ from plugins.commspt_bot.models.const import (
     get_ygg_player,
 )
 from plugins.commspt_bot.utils.adv_filter import admin_only, in_preset_cafe
+from plugins.commspt_bot.utils.request_logging import external_request
+
+_SKIN_DOWNLOAD_SERVICE = "LittleSkin 皮肤材质下载"
+"""请求日志中的服务名（&check 动态下载玩家皮肤图片）。"""
 
 
 def check_image_size_64(data: bytes) -> bool:
@@ -151,15 +155,19 @@ async def check_profile(player_name: Match[str]):
             messages.append("❌ Ygg: 未设置皮肤")
         else:
             # 下载皮肤图片并检验是否符合原版 64x64 尺寸
-            async with httpx.AsyncClient(
-                http2=True,
-                follow_redirects=True,
-                verify=VERIFY_CONTENT,
-            ) as client:
-                response = await client.get(str(ygg_profile.skin.url))
-                response.raise_for_status()
-                if not check_image_size_64(response.content):
-                    messages.extend(("⚠️ Ygg: 非标准 64x64 皮肤", "🤖 原版 MC 不支持非标准皮肤"))
+            skin_url = str(ygg_profile.skin.url)
+            # 请求日志作用域覆盖「本次皮肤下载 + 本地尺寸校验」
+            with external_request(_SKIN_DOWNLOAD_SERVICE, skin_url) as scope:
+                async with httpx.AsyncClient(
+                    http2=True,
+                    follow_redirects=True,
+                    verify=VERIFY_CONTENT,
+                ) as client:
+                    response = await client.get(skin_url)
+                    scope.response = response
+                    response.raise_for_status()
+                    if not check_image_size_64(response.content):
+                        messages.extend(("⚠️ Ygg: 非标准 64x64 皮肤", "🤖 原版 MC 不支持非标准皮肤"))
 
     except PlayerNotFoundError:
         messages.append("❌ Ygg: 不存在")

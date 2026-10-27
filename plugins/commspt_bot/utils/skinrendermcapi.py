@@ -13,6 +13,10 @@ import httpx
 from PIL import Image, ImageDraw, ImageFont
 
 from plugins.commspt_bot.config import ASSETS_DIR, S_, VERIFY_CONTENT
+from plugins.commspt_bot.utils.request_logging import external_request
+
+_SKINRENDERMC_SERVICE = "SkinRenderMC 渲染服务"
+"""请求日志中的服务名。"""
 
 
 async def request_skinrendermc(skin_url: str | None, cape_url: str | None, name_tag: str | None):
@@ -28,26 +32,30 @@ async def request_skinrendermc(skin_url: str | None, cape_url: str | None, name_
     for x in [k for k in p if not p[k]]:
         p.pop(x)
 
-    # 建立 HTTP/2 客户端发起 GET 请求，渲染接口耗时通常在 15 秒内
-    async with httpx.AsyncClient(
-        http2=True,
-        base_url=S_.api_skinrendermc.endpoint,
-        follow_redirects=True,
-        verify=VERIFY_CONTENT,
-    ) as client:
-        resp = await client.get(
-            "/url/image/both",
-            params=p,
-            timeout=30,  # 通常只需要不到 15 秒
-        )
-        # if resp.status_code == 200:
-        #     image = resp.read()
-        #     return image
-        # else:
-        #     return
-        # 校验响应状态码并直接返回图片二进制数据
-        resp.raise_for_status()
-        return resp.content
+    # 请求日志作用域覆盖「请求 + 状态码校验」：远端失败不再静默。
+    # 注意 ``process_image`` 的纯本地图像处理不在此作用域内（不算外部请求失败）。
+    with external_request(_SKINRENDERMC_SERVICE, f"{S_.api_skinrendermc.endpoint.rstrip('/')}/url/image/both") as scope:
+        # 建立 HTTP/2 客户端发起 GET 请求，渲染接口耗时通常在 15 秒内
+        async with httpx.AsyncClient(
+            http2=True,
+            base_url=S_.api_skinrendermc.endpoint,
+            follow_redirects=True,
+            verify=VERIFY_CONTENT,
+        ) as client:
+            resp = await client.get(
+                "/url/image/both",
+                params=p,
+                timeout=30,  # 通常只需要不到 15 秒
+            )
+            scope.response = resp
+            # if resp.status_code == 200:
+            #     image = resp.read()
+            #     return image
+            # else:
+            #     return
+            # 校验响应状态码并直接返回图片二进制数据
+            resp.raise_for_status()
+            return resp.content
 
 
 def process_image(image_bytes: bytes, text: str) -> bytes:

@@ -21,9 +21,11 @@ class JoinRequestNoticeError(ValueError):
 
 # 末尾边界断言 (?=[\r\n]|$) 确保 flag 后为行尾/串尾，仍拒绝 id=add_flag_extra 之类的粘连。
 # 解析使用 search 以容忍生产者拼在通知前后的提示行与图片 CQ 段。
+# 申请人行的括号后缀为可选候选提示（事件携带 invited_id 时由 formatter 追加），
+# 语义等价于旧版式：解析结果中的 applicant 始终是原始的申请人数字，候选 ID 仅作展示。
 _NOTICE_PATTERN = re.compile(
     r"新的入群申请 \((?P<kind>Main|Cafe)\)\n"
-    r"» 申请人 (?P<applicant>[0-9]+)\n"
+    r"» 申请人 (?P<applicant>[0-9]+)(?: \(也可能是: -?[0-9]+\))?\n"
     r"» 答案     (?P<answer>[^\r\n]+)\n"
     r"\nid=(?P<sub_type>add|invite)_(?P<flag>[^\s_\x00-\x1f\x7f]+)"
     r"(?=[\r\n]|$)",
@@ -36,14 +38,19 @@ def format_join_request_notice(
     answer: str,
     sub_type: NoticeSubtype,
     flag: str,
+    invited_id: int | None = None,
 ) -> str:
-    return (
-        f"新的入群申请 ({kind})\n"
-        f"» 申请人 {applicant}\n"
-        f"» 答案     {answer}\n"
-        f"\n"
-        f"id={sub_type}_{flag}"
-    )
+    """生成入群申请通知文本。
+
+    ``invited_id`` 为可选的尾部参数（位置或关键字传入皆可，**不是 keyword-only**），
+    默认 ``None`` 表示事件未携带该字段；携带时在申请人行后追加
+    `` (也可能是: {invited_id})``，``0`` 也是有效取值并照原样展示。
+    该提示只是展示用途，不参与校验、映射或实际审批身份。
+    """
+    applicant_line = f"» 申请人 {applicant}"
+    if invited_id is not None:
+        applicant_line = f"{applicant_line} (也可能是: {invited_id})"
+    return f"新的入群申请 ({kind})\n{applicant_line}\n» 答案     {answer}\n\nid={sub_type}_{flag}"
 
 
 def parse_join_request_notice(message: str) -> JoinRequestNotice:

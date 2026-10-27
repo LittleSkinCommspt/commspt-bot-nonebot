@@ -49,6 +49,35 @@ def _group_rule(group_id: int):
     return Rule(_checker)
 
 
+def _invited_id_of(req: GroupRequestEvent) -> int | None:
+    """读取事件中协议端可能附带的 invited_id。
+
+    返回 ``None`` 表示事件未携带该字段（或取值类型不是整数，例如字符串/布尔）；
+    ``0`` 是合法取值，照原样返回并展示，不做任何"缺失"推断。
+    该值仅用于通知展示，绝不作为校验/映射/审批身份。
+    """
+    value = getattr(req, "invited_id", None)
+    if value is None:
+        return None
+    if isinstance(value, bool):  # bool 是 int 的子类，需先排除以免 True/False 被当成 1/0
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
+# 原始 user_id == 0 时申请留言可能为空，此时用占位答案保证通知格式仍可被解析
+_ZERO_APPLICANT_ANSWER_PLACEHOLDER = "（无留言）"
+
+
+def _extract_answer(comment: str | None) -> str:
+    """从申请留言最后一行提取答案（无留言时返回空串）。"""
+    lines = (comment or "").splitlines()
+    if not lines:
+        return ""
+    return lines[-1].removeprefix("答案：").strip()
+
+
 async def _send_approval_notice(
     bot: Bot,
     group_id: int,
@@ -59,11 +88,13 @@ async def _send_approval_notice(
     flag: str,
     message: list[str],
     image: bytes | None = None,
+    invited_id: int | None = None,
 ) -> None:
     """向群聊发送入群审批通知并贴上 👍/👎 表情，登记表情审批凭证。
 
     仅用于「需要管理员人工处理」的通知；自动通过 / 纯结果通知请直接用 _send_to_group。
     协议端不支持 set_msg_emoji_like 时静默降级，不影响 do 命令审批。
+    ``invited_id`` 仅作为申请人行的候选提示（见 format_join_request_notice）。
     """
     notice = JoinRequestNotice(
         kind=kind,
@@ -73,7 +104,7 @@ async def _send_approval_notice(
         flag=flag,
     )
     # 保持与旧实现一致：通知块在前，附加提示行在后
-    parts = [format_join_request_notice(kind, applicant, answer, sub_type, flag), *message]
+    parts = [format_join_request_notice(kind, applicant, answer, sub_type, flag, invited_id), *message]
     noti = UniMessage()
     if image:
         noti = noti.image(raw=image)
@@ -115,12 +146,35 @@ main_join_request = on_request(
 async def member_join_request(bot: Bot, event: GroupRequestEvent):
     req = event
     applicant = req.user_id
+    invited_id = _invited_id_of(req)
     message: list[str] = []
+
+    if applicant == 0:
+        # 原始 user_id 为 0 时按策略一律转人工审核：不进入云控自动同意、
+        # QMail 校验与 QQ/UID 映射写入/查询，由管理员基于通知内容判断。
+        answer = _extract_answer(req.comment)
+        logger.warning(
+            f"(main) request from {applicant} needs manual review because user_id is 0. "
+            f"{applicant} > {answer} (invited_id={invited_id})",
+        )
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.commspt_group,
+            "Main",
+            applicant,
+            answer or _ZERO_APPLICANT_ANSWER_PLACEHOLDER,
+            req.sub_type,
+            req.flag,
+            ["👀 申请人 user_id 为 0，需手动处理"],
+            invited_id=invited_id,
+        )
+        return
+
     if not req.comment:
         logger.warning(f"(main) request from {applicant} was ignored because request message is empty.")
         return
 
-    answer = req.comment.splitlines()[-1].removeprefix("答案：").strip()  # 从申请留言最后一行提取填写的 UID 答案
+    answer = _extract_answer(req.comment)  # 从申请留言最后一行提取填写的 UID 答案
     logger.info(f"Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
 
     try:
@@ -129,7 +183,9 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             await random_sleep(3)  # sleep before action
             await req.approve(bot)  # 调用 OneBot V11 API 同意入群申请
 
-            message.append(format_join_request_notice("Main", applicant, answer, req.sub_type, req.flag))
+            message.append(
+                format_join_request_notice("Main", applicant, answer, req.sub_type, req.flag, invited_id),
+            )
             message.append("👆 已同意 [云控策略：enable_auto_accept_join_request_main]")
             logger.info(
                 f"Member Join Request Event {req.sub_type} flag={req.flag} was auto accepted by cloudconfig policy "
@@ -156,6 +212,7 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             req.sub_type,
             req.flag,
             ["👀 答案不是纯数字，需手动处理"],
+            invited_id=invited_id,
         )
         return
 
@@ -185,21 +242,6 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
         else:
             if email_uid := await LittleSkinUser.qmail_api(qq=applicant):  # 若申请人 QQ 邮箱曾绑定过其他 UID 则提示可能正确的 UID
                 message.append(f"ⓘ 可能才为正确对应的 UID: {email_uid.uid}")
-
-            # 响应体里的 invited_id 有时才是真实对应的 UID：
-            # 当协议端给出的请求体中 user_id 为 0（申请人身份字段缺失/异常）时，
-            # 被邀请人 invited_id 往往才代表真正要核对的那个人。
-            # 这是「需要判断」的提示，因此独立成条（不与上面的 UID 提示合并同类项），
-            # 仅当响应体确实携带了非零 invited_id 时才输出，避免无意义空提示。
-            if invited_id := getattr(req, "invited_id", None):  # Getattr 兜底：协议端未携带该字段时属性不存在
-                hint = f"ⓘ 响应体(invited_id)反映他可能是: {invited_id}"
-                # message 各项会被 _send_approval_notice 用 "\n\n".join 拼接，
-                # 直接 append 会在两条 ⓘ 之间多出一个空行；这里改用单换行紧跟上一行，
-                # 使两条同族提示紧凑相邻（其它提示行之间的空行保持不变）。
-                if message and message[-1].startswith("ⓘ 可能才为正确对应的 UID:"):
-                    message[-1] += f"\n{hint}"
-                else:
-                    message.append(hint)
 
             # failed: not pass verification
             logger.warning(
@@ -235,20 +277,47 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
         # 请求失败仍需向群聊发送加群申请通知，方便管理员交互处理
         await random_sleep(4)  # sleep before action
         await _send_approval_notice(
-            bot, S_.defined_qq.commspt_group, "Main", applicant, answer, req.sub_type, req.flag, message, image
+            bot,
+            S_.defined_qq.commspt_group,
+            "Main",
+            applicant,
+            answer,
+            req.sub_type,
+            req.flag,
+            message,
+            image,
+            invited_id=invited_id,
         )
         return
 
     if uid_not_exists:
         await random_sleep(3)  # sleep before action
         await _send_approval_notice(
-            bot, S_.defined_qq.commspt_group, "Main", applicant, answer, req.sub_type, req.flag, message, image
+            bot,
+            S_.defined_qq.commspt_group,
+            "Main",
+            applicant,
+            answer,
+            req.sub_type,
+            req.flag,
+            message,
+            image,
+            invited_id=invited_id,
         )
         return
 
     await random_sleep(4)  # sleep before action
     await _send_approval_notice(
-        bot, S_.defined_qq.commspt_group, "Main", applicant, answer, req.sub_type, req.flag, message, image
+        bot,
+        S_.defined_qq.commspt_group,
+        "Main",
+        applicant,
+        answer,
+        req.sub_type,
+        req.flag,
+        message,
+        image,
+        invited_id=invited_id,
     )
 
 
@@ -265,6 +334,28 @@ cafe_join_request = on_request(
 async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
     req = event
     applicant = req.user_id
+    invited_id = _invited_id_of(req)
+
+    if applicant == 0:
+        # 原始 user_id 为 0 时按策略一律转人工审核：不查 UID、不查/写映射、不自动同意。
+        answer = _extract_answer(req.comment)
+        logger.warning(
+            f"(cafe) request from {applicant} needs manual review because user_id is 0. "
+            f"{applicant} > {answer} (invited_id={invited_id})",
+        )
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.littleskin_cafe,
+            "Cafe",
+            applicant,
+            answer or _ZERO_APPLICANT_ANSWER_PLACEHOLDER,
+            req.sub_type,
+            req.flag,
+            ["👀 申请人 user_id 为 0，需手动处理"],
+            invited_id=invited_id,
+        )
+        return
+
     if not req.comment:
         return
 
@@ -285,6 +376,7 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
             req.sub_type,
             req.flag,
             ["👀 答案不是纯数字，需手动处理"],
+            invited_id=invited_id,
         )
         return
 
@@ -308,6 +400,7 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
             req.sub_type,
             req.flag,
             ["⚠️ 需手动处理"],
+            invited_id=invited_id,
         )
         return
 
@@ -325,6 +418,7 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
             req.sub_type,
             req.flag,
             ["👀 这个 UID 根本不存在，需手动处理"],
+            invited_id=invited_id,
         )
         return
 

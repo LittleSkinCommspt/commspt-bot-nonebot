@@ -35,8 +35,8 @@ EMOJI_APPROVE = "128077"  # 👍
 EMOJI_REJECT = "128078"  # 👎
 APPROVAL_EMOJIS = (EMOJI_APPROVE, EMOJI_REJECT)  # 审批引导表情（👍 批准 / 👎 拒绝）
 
-# 拒绝原因默认值（沿用原 commspt_do_action_join 文案）
-DEFAULT_REJECT_REASON = "答案错误，再仔细看看"
+# 未指定拒绝原因时的默认提示
+DEFAULT_REJECT_REASON = "请正确填写UID"
 
 # 凭证保留时长（秒），默认 24 小时
 _APPROVAL_TTL = 24 * 60 * 60

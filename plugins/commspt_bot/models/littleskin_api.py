@@ -81,6 +81,7 @@ class LittleSkinUser(BaseModel):
                 http2=True,
                 headers={"Authorization": f"Bearer {S_.littleskin_admin_token}"},
                 verify=VERIFY_CONTENT,
+                timeout=httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0),
             ) as client:
                 api = await client.get(_LITTLESKIN_ADMIN_USERS_URL, params={"q": query_string})
                 scope.response = api

@@ -15,6 +15,9 @@
     API_SKINRENDERMC__ENDPOINT=https://...
     API_MIHARI_SVG__ENDPOINT=https://...
     DB_MONGO__URL=mongodb://...
+    DB_MONGO__CONNECT_TIMEOUT_MS=5000
+    DB_MONGO__SERVER_SELECTION_TIMEOUT_MS=10000
+    DB_MONGO__SOCKET_TIMEOUT_MS=10000
     API_BINGLING_IPIP__ENDPOINT=https://...
     API_BROWSERLESS__ENDPOINT=https://...
     BROWSERLESS_MODE=REMOTE
@@ -117,7 +120,24 @@ class API_mihari_svg(BaseModel):
 
 
 class DB_mongo(BaseModel):
+    """MongoDB 连接配置。
+
+    超时单位为毫秒。连接串里已显式声明的同名选项优先，此处仅作为缺省值，
+    避免覆盖运维在 ``DB_MONGO__URL`` 中写入的显式设置。
+    """
+
     url: str = ""
+
+    # 建立 TCP/TLS 连接超时
+    connect_timeout_ms: int = 5000
+
+    # 选主 / 选节点超时。不得小于 heartbeatFrequencyMS(默认 10000)，
+    # 否则副本集切换期间必然连不上。
+    server_selection_timeout_ms: int = 10000
+
+    # 连接建立后单次操作的读超时。PyMongo 默认 None（无限等待），
+    # 半开连接会让 find_one 永久挂起，因此必须显式设置。
+    socket_timeout_ms: int = 10000
 
 
 class API_bingling_ipip(BaseModel):

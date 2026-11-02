@@ -99,9 +99,10 @@ cp config.yml.example config.yml
 | `request_logging`（`config.yml`） | 请求日志开关与目录：`enabled`（默认 `true`）、`directory`（默认 `./logs/commspt-bot/`），见[请求日志](#request-logging) |
 | `LITTLESKIN_ADMIN_TOKEN` | LittleSkin Admin API Token |
 | `DB_MONGO__URL` | MongoDB 连接串（QQ↔UID 映射） |
+| `DB_MONGO__CONNECT_TIMEOUT_MS` / `__SERVER_SELECTION_TIMEOUT_MS` / `__SOCKET_TIMEOUT_MS` | MongoDB 客户端超时（毫秒，默认 5000 / 10000 / 10000）。连接串中已显式声明的同名选项优先 |
 | `API_BROWSERLESS__ENDPOINT` | browserless 截图服务（`BROWSERLESS_MODE=REMOTE` 时使用） |
 | `BROWSERLESS_MODE` | 出图后端：`REMOTE`（默认，调用远程 Browserless）或 `LOCAL`（本地 Playwright 渲染）。`LOCAL` 需先安装可选依赖与浏览器内核：`uv sync --extra render-local && uv run playwright install chromium`，并自行准备 `assets/browserless/` 下的本地资源（含字体，详见下文「本地渲染」小节） |
-| `FAILED_RETRY_TIME` | 外部网络服务请求失败后的重试次数（默认 `2`，即合计最多 3 次请求；`0` 表示不重试）。生效于 `&ygg` / `&pro` / `&user` / `&uid`，渲染类服务（SkinRenderMC / Browserless / 本地 Playwright）与 QQ 协议端调用不重试 |
+| `FAILED_RETRY_TIME` | 外部网络服务请求失败后的重试次数（默认 `2`，即合计最多 3 次请求；`0` 表示不重试）。生效于 `&ygg` / `&pro` / `&user` / `&uid` 以及入群申请链路（主站查询、映射数据库读写、云控拉取、IP 属地）。审批动作、消息发送、渲染类服务（SkinRenderMC / Browserless / 本地 Playwright）与 QQ 协议端调用不重试 |
 | `API_SKINRENDERMC__ENDPOINT` | 皮肤渲染服务 |
 | `API_CLOUDCONFIG` | 云控配置（JSON 对象） |
 | `API_FEISHU__APP_ID` / `API_FEISHU__APP_SECRET` | 飞书自建应用凭证（`&banlog` 写多维表格用），见[飞书封禁记录](#feishu-ban-record) |
@@ -212,6 +213,7 @@ request_logging:
 - 重试的中间失败只在控制台告警，**最终失败才写日志文件**；**重试后成功则完全不写失败记录**；
 - 「查无此人」等业务性结果不算请求失败，不落盘；
 - 日志实现**不改变现有重试策略**（`FAILED_RETRY_TIME` 的语义与生效范围保持不变，见上方配置项说明）。
+- 入群申请链路同样遵循上述规则：单个外部调用重试耗尽才落盘一次，其余环节成功则不记录。
 
 #### 写入失败的兜底
 
@@ -319,6 +321,15 @@ request_logging:
 
 申请人始终显示事件原始的 `user_id`；若事件携带整数类型的 `invited_id`（包括 `0`），则追加候选提示，例如 `申请人 0 (也可能是: 123456)`。该提示不要求 `user_id` 为零，也不会把 `invited_id` 当作已确认的申请人或用于 QQ/UID 映射。当原始 `user_id=0` 时，主群与茶馆群均不自动批准，而是发送上述人工审核通知；主群云控自动同意策略也不能绕过此限制。
 
+每个外部依赖（主站管理端 API、映射数据库、云控配置、IP 属地、出图、飞书封禁记录）都独立降级：任一环节失败只影响该环节，且不会再把整条申请笼统报成「主站/映射数据库服务请求失败」。可靠性相关的行为：
+
+- 重试严格遵循 `FAILED_RETRY_TIME`（1 次请求 + N 次重试，`0` 表示不重试），主站查询、映射数据库读写、云控拉取、IP 属地查询均适用；审批动作本身不重试。
+- 申请留言为空（`None` / 空串 / 纯空白 / 只有 `答案：`）时转人工审核，不会因为取不到 UID 而丢单。
+- QMail 校验通过即自动同意；若随后映射写入失败，仍照常自动同意，只补发一条纯文本提示，建议用 `&setuid` 补写映射。
+- 云控拉取失败时**不使用任何缓存或历史值**，仅跳过云控自动同意路径；QMail 的确定性校验仍然生效。
+- IP 属地查询失败只让通知卡片显示「未获取」，不影响出图与审批。
+- 审批动作前没有任何人为延时。
+
 管理员有两种等价的操作方式，二者共用同一执行核心，同一条申请只会被处理一次：
 
 1. **文字命令**：回复该通知消息，发送 `do accept` 或 `do reject [原因]`（裸命令，不受全局前缀影响）。
@@ -330,6 +341,7 @@ request_logging:
 - 单表情直接判定意图；多种表情并存时调用 `get_msg_emoji_likes` 复核操作者本人贴的表情，查询失败时按 fail-closed 处理（不审批、保留凭证供重试）。
 - 审批结果在群内 @ 操作管理员播报；成功时撤销通知消息上的 👍/👎 引导表情，执行出错则保留凭证便于重试。
 - 协议端不支持 `set_msg_emoji_like` / `group_msg_emoji_like` 时静默降级，不影响 `do` 命令审批。
+- 自动同意的结果通知为纯文本（不贴 👍/👎、不登记审批凭证），避免对已消费的 flag 二次审批。
 
 ### 3. 运行
 

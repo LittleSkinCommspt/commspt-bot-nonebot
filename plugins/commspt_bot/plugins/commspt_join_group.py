@@ -8,7 +8,18 @@
 - GroupRequestEvent: LittleSkin 主群加群申请 (rule=主群; 自动/手动审核)
 - GroupRequestEvent: LittleSkin 茶馆群加群申请 (rule=茶馆群; 自动审核)
 - GroupIncreaseNoticeEvent: LittleSkin 主群新成员进群 (rule=主群; 发送欢迎语与管理通知)
+
+可靠性约定：
+- 每个外部调用（主站 / 映射数据库 / IP 属地 / 云控）各自独立包裹，失败互不牵连；
+- 重试统一走 ``call_with_retry``，次数严格由 ``S_.failed_retry_time`` 决定
+  （1 次请求 + N 次重试），本模块不写死任何重试次数；
+- 「是否放人」只由确定性身份校验（云控策略 / QMail 匹配 / UID 存在性）决定，
+  映射写入、IP 属地、出图、封禁查询等展示或记录环节一律 best-effort；
+- 审批调用统一走 ``utils.join_action.execute_join_action``，失败不再静默丢弃；
+- 已自动同意的结果通知使用纯文本发送，不贴审批表情、不登记审批凭证。
 """
+
+import asyncio
 
 import arrow
 from nonebot import logger, on_notice, on_request
@@ -28,7 +39,15 @@ from plugins.commspt_bot.models.littleskin_api import LittleSkinUser
 from plugins.commspt_bot.models.mongodb_data import UIDMapping
 from plugins.commspt_bot.models.render_user_info import RenderUserInfo
 from plugins.commspt_bot.utils.ban_lookup import banned_records_block
-from plugins.commspt_bot.utils.join_action import APPROVAL_EMOJIS, remember_approval
+from plugins.commspt_bot.utils.command_prefix import display_command
+from plugins.commspt_bot.utils.join_action import (
+    ALREADY_HANDLED,
+    APPROVAL_EMOJIS,
+    SUCCESS,
+    JoinActionResult,
+    execute_join_action,
+    remember_approval,
+)
 from plugins.commspt_bot.utils.join_request_notice import (
     JoinRequestNotice,
     NoticeKind,
@@ -38,7 +57,16 @@ from plugins.commspt_bot.utils.join_request_notice import (
 from plugins.commspt_bot.utils.messenger import send_to_group as _send_to_group
 from plugins.commspt_bot.utils.messenger import send_to_group_with_id as _send_to_group_with_id
 from plugins.commspt_bot.utils.qq_profile import get_qq_nickname
-from plugins.commspt_bot.utils.random_sleep import random_sleep
+from plugins.commspt_bot.utils.retry import call_with_retry
+
+_MAIN_SERVICE = "LittleSkin 管理端 API"
+"""主站管理端 API 在重试日志中的服务名。"""
+
+_MONGO_SERVICE = "MongoDB 映射数据库"
+"""映射数据库在重试日志中的服务名。"""
+
+_SETUID = display_command("setuid")
+"""补写映射用的管理端命令展示文本（前缀跟随 COMMAND_START）。"""
 
 
 def _group_rule(group_id: int):
@@ -66,16 +94,104 @@ def _invited_id_of(req: GroupRequestEvent) -> int | None:
     return None
 
 
-# 原始 user_id == 0 时申请留言可能为空，此时用占位答案保证通知格式仍可被解析
-_ZERO_APPLICANT_ANSWER_PLACEHOLDER = "（无留言）"
+# 无留言（含 user_id == 0）时使用的占位答案，保证通知格式仍可被解析
+_NO_COMMENT_PLACEHOLDER = "（无留言）"
+# 兼容旧名：语义已扩展为「无留言」，零申请人与空留言共用同一占位
+_ZERO_APPLICANT_ANSWER_PLACEHOLDER = _NO_COMMENT_PLACEHOLDER
+
+_ANSWER_PREFIXES = ("答案：", "答案:")
+"""申请留言的答案前缀（全角/半角冒号都兼容）。"""
 
 
 def _extract_answer(comment: str | None) -> str:
-    """从申请留言最后一行提取答案（无留言时返回空串）。"""
-    lines = (comment or "").splitlines()
-    if not lines:
-        return ""
-    return lines[-1].removeprefix("答案：").strip()
+    """从申请留言中提取答案（取最后一个非空白行，无留言时返回空串）。
+
+    QQ 留言常带尾随空行，直接取 ``splitlines()[-1]`` 会得到空串并被误判为
+    「答案不是纯数字」。这里从后往前找第一个非空白行，并剥离全角/半角冒号前缀。
+    """
+    for line in reversed((comment or "").splitlines()):
+        text = line.strip()
+        if not text:
+            continue
+        for prefix in _ANSWER_PREFIXES:
+            if text.startswith(prefix):
+                text = text[len(prefix) :]
+                break
+        return text.strip()
+    return ""
+
+
+def _service_failure_text() -> str:
+    """主站查询失败提示（重试次数跟随配置）。"""
+    return f"⚠️ 主站查询失败（已重试 {S_.failed_retry_time} 次），需手动处理"
+
+
+def _mapping_read_failure_text() -> str:
+    """映射数据库读取失败提示。"""
+    return "⚠️ 映射数据库不可用，需手动核对 UID"
+
+
+def _mapping_write_failure_text() -> str:
+    """映射写入失败提示（审批结果仍有效，只需补写台账）。"""
+    return f"⚠️ 映射写入失败，请用 {_SETUID} 补写"
+
+
+def _render_failure_text() -> str:
+    """用户卡片渲染失败提示（明确不影响审批）。"""
+    return "⚠️ 用户卡片渲染失败（不影响审批）"
+
+
+def _cloudconfig_failure_text() -> str:
+    """云控不可用提示（明确本次按人工审核处理）。"""
+    return f"⚠️ 云控不可用（已重试 {S_.failed_retry_time} 次），本次按人工审核处理"
+
+
+async def _approve_request(
+    bot: Bot,
+    notice: JoinRequestNotice,
+    *,
+    source: str,
+) -> JoinActionResult:
+    """统一执行自动同意，异常分类与日志与手动审批保持一致。"""
+    result = await execute_join_action(bot, notice, approve=True, source=source)
+    if result.outcome == SUCCESS:
+        logger.success(
+            f"join request auto accepted [{source}]: kind={notice.kind} "
+            f"applicant={notice.applicant} answer={notice.answer}",
+        )
+    elif result.outcome == ALREADY_HANDLED:
+        logger.warning(
+            f"join request already handled or expired [{source}]: kind={notice.kind} "
+            f"applicant={notice.applicant} flag={notice.flag}",
+        )
+    return result
+
+
+async def _write_mapping(uid: int, qq: int, *, qmail_verified: bool = False) -> bool:
+    """best-effort 写入 QQ↔UID 映射；失败只记日志并返回 False。"""
+    try:
+        await call_with_retry(
+            _MONGO_SERVICE,
+            UIDMapping(uid=uid, qq=qq, qmail_verified=qmail_verified).update,
+        )
+    except Exception as e:
+        logger.exception(e)
+        return False
+    return True
+
+
+async def _render_card(bot: Bot, ltsk_user: LittleSkinUser, qq: int) -> bytes | None:
+    """best-effort 渲染用户卡片；失败返回 None（不影响审批）。"""
+    try:
+        render = RenderUserInfo(
+            **ltsk_user.model_dump(),
+            qq=qq,
+            qq_nickname=await get_qq_nickname(bot, qq),
+        )
+        return await render.get_image()
+    except Exception as e:
+        logger.exception(e)
+        return None
 
 
 async def _send_approval_notice(
@@ -119,18 +235,44 @@ async def _send_approval_notice(
         logger.warning("无法从发送回执解析 message_id，跳过贴表情（可用 do 命令审批）")
         return
 
-    for emoji in APPROVAL_EMOJIS:
-        try:
-            await bot.call_api(
-                "set_msg_emoji_like",
-                message_id=message_id,
-                emoji_id=emoji,
-                set=True,
-            )
-        except Exception as e:
-            logger.warning(f"贴表情 {emoji} 失败：{type(e).__name__}: {e}")
-
+    # 先登记凭证再贴表情：贴表情期间管理员即可通过 do 命令审批
     await remember_approval(message_id, notice)
+
+    results = await asyncio.gather(
+        *(
+            bot.call_api("set_msg_emoji_like", message_id=message_id, emoji_id=emoji, set=True)
+            for emoji in APPROVAL_EMOJIS
+        ),
+        return_exceptions=True,
+    )
+    for emoji, outcome in zip(APPROVAL_EMOJIS, results):
+        if isinstance(outcome, BaseException):
+            logger.warning(f"贴表情 {emoji} 失败：{type(outcome).__name__}: {outcome}")
+
+
+async def _auto_accept_notice(
+    group_id: int,
+    applicant: int,
+    answer: str,
+    sub_type: NoticeSubtype,
+    flag: str,
+    *,
+    kind: NoticeKind,
+    headline: str,
+    extra: list[str] | None = None,
+    invited_id: int | None = None,
+) -> None:
+    """发送「已自动同意」的纯文本结果通知（无表情、无审批凭证）。
+
+    申请已被消费，再挂 👍/👎 会诱导管理员对已处理的 flag 重复审批，
+    因此这里刻意不走 _send_approval_notice。
+    """
+    parts = [
+        format_join_request_notice(kind, applicant, answer, sub_type, flag, invited_id),
+        headline,
+        *(extra or []),
+    ]
+    await _send_to_group(group_id, "\n\n".join(p for p in parts if p))
 
 
 # region member join request
@@ -147,7 +289,6 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
     req = event
     applicant = req.user_id
     invited_id = _invited_id_of(req)
-    message: list[str] = []
 
     if applicant == 0:
         # 原始 user_id 为 0 时按策略一律转人工审核：不进入云控自动同意、
@@ -162,7 +303,7 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             S_.defined_qq.commspt_group,
             "Main",
             applicant,
-            answer or _ZERO_APPLICANT_ANSWER_PLACEHOLDER,
+            answer or _NO_COMMENT_PLACEHOLDER,
             req.sub_type,
             req.flag,
             ["👀 申请人 user_id 为 0，需手动处理"],
@@ -170,39 +311,29 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
         )
         return
 
-    if not req.comment:
-        logger.warning(f"(main) request from {applicant} was ignored because request message is empty.")
+    answer = _extract_answer(req.comment)
+    if not answer:
+        # 空留言过去直接 return，申请人会永久卡住且管理员无感知；改为转人工
+        logger.warning(f"(main) request from {applicant} has no answer, falling back to manual review.")
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.commspt_group,
+            "Main",
+            applicant,
+            _NO_COMMENT_PLACEHOLDER,
+            req.sub_type,
+            req.flag,
+            ["👀 申请留言为空，需手动处理"],
+            invited_id=invited_id,
+        )
         return
 
-    answer = _extract_answer(req.comment)  # 从申请留言最后一行提取填写的 UID 答案
     logger.info(f"Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
-
-    try:
-        cloudconfig = await CloudConfig.fetch()
-        if cloudconfig.enable_auto_accept_join_request_main:  # 云控策略：若启用主群自动同意则直接批准
-            await random_sleep(3)  # sleep before action
-            await req.approve(bot)  # 调用 OneBot V11 API 同意入群申请
-
-            message.append(
-                format_join_request_notice("Main", applicant, answer, req.sub_type, req.flag, invited_id),
-            )
-            message.append("👆 已同意 [云控策略：enable_auto_accept_join_request_main]")
-            logger.info(
-                f"Member Join Request Event {req.sub_type} flag={req.flag} was auto accepted by cloudconfig policy "
-                f"[enable_auto_accept_join_request_main]. {applicant} > {answer}",
-            )
-
-            await random_sleep(3)  # sleep before action
-            await _send_to_group(S_.defined_qq.commspt_group, "\n\n".join(m for m in message if m))
-            return
-    except Exception as e:
-        logger.exception(e)
 
     if not answer.isdecimal():  # UID 应为十进制纯数字
         logger.warning(
             f"(main) Member Join Request Event {req.sub_type} was ignored. (ANSWER NOT DECIMAL) {applicant} > {answer}",
         )
-        await random_sleep(3)  # sleep before action
         await _send_approval_notice(
             bot,
             S_.defined_qq.commspt_group,
@@ -217,65 +348,37 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
         return
 
     uid = int(answer)
+    notice = JoinRequestNotice("Main", applicant, answer, req.sub_type, req.flag)
 
-    image: bytes | None = None
-    qmail_passed = False
-    uid_not_exists = False
-    api_error = False
+    # ---- ① 云控策略：只在拉取成功且开关打开时自动放人 ----
+    # 不使用任何缓存或历史值：拿不到当前授权就不放人（fail-closed），
+    # 但云控不可用不阻断下方的 QMail 确定性校验。
+    auto_accept = False
+    cloudconfig_failed = False
     try:
-        # qmail api verification
-        ltsk_qmail = await LittleSkinUser.qmail_api(applicant)
-        if ltsk_qmail and ltsk_qmail.uid == uid:
-            # ok: pass verification
-            await UIDMapping(uid=uid, qq=applicant, qmail_verified=True).update()  # 记录/更新 QQ 与 UID 映射及验证状态
-            logger.success(
-                f"(main) Member Join Request Event {req.sub_type} was accepted. (QMAIL PASS) {applicant} > {answer}",
-            )
-            qmail_passed = True
-        elif not await LittleSkinUser.uid_info(uid):  # 校验所填 UID 是否在 LittleSkin 平台存在
-            # failed: uid not exists
-            logger.warning(
-                f"(main) Member Join Request Event {req.sub_type} was ignored. (UID NOT EXISTS) {applicant} > {answer}",
-            )
-            message.append("👀 这个 UID 根本不存在，需手动处理")
-            uid_not_exists = True
-        else:
-            if email_uid := await LittleSkinUser.qmail_api(qq=applicant):  # 若申请人 QQ 邮箱曾绑定过其他 UID 则提示可能正确的 UID
-                message.append(f"ⓘ 可能才为正确对应的 UID: {email_uid.uid}")
-
-            # failed: not pass verification
-            logger.warning(
-                f"(main) Member Join Request Event {req.sub_type} was ignored. (GENERAL) {applicant} > {answer}",
-            )
-            await UIDMapping(uid=uid, qq=applicant).update()
-            message.append("👀 请手动处理")
-
-            if ltsk_user := await LittleSkinUser.uid_info(answer):  # 查询并渲染用户信息卡片，辅助管理员人工审核
-                render = RenderUserInfo(
-                    **ltsk_user.model_dump(), qq=int(applicant), qq_nickname=await get_qq_nickname(bot, applicant)
-                )
-                image = await render.get_image()
-                # 该账号被封禁时，在审批通知里附上飞书封禁记录
-                # （通知只发往内部管理群，无需再判断群号）
-                if block := await banned_records_block(ltsk_user.uid, permission=ltsk_user.permission):
-                    message.append(block)
-            else:
-                message.append("👀 未获取到 UID 信息，无法渲染图片")
+        cloudconfig = await call_with_retry("云控配置", CloudConfig.fetch)
+        auto_accept = cloudconfig.enable_auto_accept_join_request_main
     except Exception as e:
-        # 主站或映射数据库不可用时降级：仍发送申请通知，交由管理员手动处理
         logger.exception(e)
-        message.append("⚠️ 主站/映射数据库服务请求失败，需手动处理")
-        image = None
-        api_error = True
+        cloudconfig_failed = True
 
-    if qmail_passed:
-        await random_sleep(3)  # sleep before action
-        await req.approve(bot)  # 校验通过，调用 API 同意入群
-        return
-
-    if api_error:
-        # 请求失败仍需向群聊发送加群申请通知，方便管理员交互处理
-        await random_sleep(4)  # sleep before action
+    if auto_accept:
+        result = await _approve_request(bot, notice, source="auto:cloudconfig")
+        if result.outcome == SUCCESS:
+            await _auto_accept_notice(
+                S_.defined_qq.commspt_group,
+                applicant,
+                answer,
+                req.sub_type,
+                req.flag,
+                kind="Main",
+                headline="👆 已同意 [云控策略：enable_auto_accept_join_request_main]",
+                invited_id=invited_id,
+            )
+            return
+        if result.outcome == ALREADY_HANDLED:
+            return
+        # 审批调用本身出错：落回人工通知，避免静默丢失
         await _send_approval_notice(
             bot,
             S_.defined_qq.commspt_group,
@@ -284,14 +387,16 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             answer,
             req.sub_type,
             req.flag,
-            message,
-            image,
+            ["⚠️ 自动同意调用失败，需手动处理"],
             invited_id=invited_id,
         )
         return
 
-    if uid_not_exists:
-        await random_sleep(3)  # sleep before action
+    # ---- ② QMail 校验（唯一一次请求，结果同时用于候选 UID 提示）----
+    try:
+        email_uid = await call_with_retry(_MAIN_SERVICE, LittleSkinUser.qmail_api, applicant)
+    except Exception as e:
+        logger.exception(e)
         await _send_approval_notice(
             bot,
             S_.defined_qq.commspt_group,
@@ -300,13 +405,101 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             answer,
             req.sub_type,
             req.flag,
-            message,
-            image,
+            _build_failure_hints(cloudconfig_failed, _service_failure_text()),
             invited_id=invited_id,
         )
         return
 
-    await random_sleep(4)  # sleep before action
+    if email_uid and email_uid.uid == uid:
+        # 身份校验通过：先放人，再把映射写入当作台账 best-effort 处理
+        result = await _approve_request(bot, notice, source="auto:qmail")
+        if result.outcome == ALREADY_HANDLED:
+            return
+        if result.outcome != SUCCESS:
+            await _send_approval_notice(
+                bot,
+                S_.defined_qq.commspt_group,
+                "Main",
+                applicant,
+                answer,
+                req.sub_type,
+                req.flag,
+                ["⚠️ 自动同意调用失败，需手动处理"],
+                invited_id=invited_id,
+            )
+            return
+        if not await _write_mapping(uid, applicant, qmail_verified=True):
+            await _auto_accept_notice(
+                S_.defined_qq.commspt_group,
+                applicant,
+                answer,
+                req.sub_type,
+                req.flag,
+                kind="Main",
+                headline="👆 已同意 [QMAIL 验证通过]",
+                extra=[_mapping_write_failure_text()],
+                invited_id=invited_id,
+            )
+        return
+
+    # ---- ③ UID 存在性校验（唯一一次请求，结果同时用于出图）----
+    try:
+        ltsk_user = await call_with_retry(_MAIN_SERVICE, LittleSkinUser.uid_info, uid)
+    except Exception as e:
+        logger.exception(e)
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.commspt_group,
+            "Main",
+            applicant,
+            answer,
+            req.sub_type,
+            req.flag,
+            _build_failure_hints(cloudconfig_failed, _service_failure_text()),
+            invited_id=invited_id,
+        )
+        return
+
+    if not ltsk_user:
+        logger.warning(
+            f"(main) Member Join Request Event {req.sub_type} was ignored. (UID NOT EXISTS) {applicant} > {answer}",
+        )
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.commspt_group,
+            "Main",
+            applicant,
+            answer,
+            req.sub_type,
+            req.flag,
+            _build_failure_hints(cloudconfig_failed, "👀 这个 UID 根本不存在，需手动处理"),
+            invited_id=invited_id,
+        )
+        return
+
+    # ---- 需人工处理：映射写入与出图并发，两者都是 best-effort ----
+    hints: list[str] = []
+    if email_uid:
+        hints.append(f"ⓘ 可能才为正确对应的 UID: {email_uid.uid}")
+    hints.append("👀 请手动处理")
+
+    mapping_ok, image = await asyncio.gather(
+        _write_mapping(uid, applicant),
+        _render_card(bot, ltsk_user, applicant),
+    )
+    if not mapping_ok:
+        hints.append(_mapping_write_failure_text())
+    if image is None:
+        hints.append(_render_failure_text())
+    else:
+        # 该账号被封禁时，在审批通知里附上飞书封禁记录
+        # （通知只发往内部管理群，无需再判断群号）
+        if block := await banned_records_block(ltsk_user.uid, permission=ltsk_user.permission):
+            hints.append(block)
+
+    logger.warning(
+        f"(main) Member Join Request Event {req.sub_type} was ignored. (GENERAL) {applicant} > {answer}",
+    )
     await _send_approval_notice(
         bot,
         S_.defined_qq.commspt_group,
@@ -315,10 +508,18 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
         answer,
         req.sub_type,
         req.flag,
-        message,
+        _build_failure_hints(cloudconfig_failed, *hints),
         image,
         invited_id=invited_id,
     )
+
+
+def _build_failure_hints(cloudconfig_failed: bool, *hints: str) -> list[str]:
+    """汇总人工通知的提示行（云控不可用时追加说明，便于运维发现云控故障）。"""
+    merged = list(hints)
+    if cloudconfig_failed:
+        merged.append(_cloudconfig_failure_text())
+    return merged
 
 
 # endregion
@@ -348,7 +549,7 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
             S_.defined_qq.littleskin_cafe,
             "Cafe",
             applicant,
-            answer or _ZERO_APPLICANT_ANSWER_PLACEHOLDER,
+            answer or _NO_COMMENT_PLACEHOLDER,
             req.sub_type,
             req.flag,
             ["👀 申请人 user_id 为 0，需手动处理"],
@@ -356,10 +557,23 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
         )
         return
 
-    if not req.comment:
+    answer = _extract_answer(req.comment)
+    if not answer:
+        # 空留言过去直接 return，申请人会永久卡住且管理员无感知；改为转人工
+        logger.warning(f"(cafe) request from {applicant} has no answer, falling back to manual review.")
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.littleskin_cafe,
+            "Cafe",
+            applicant,
+            _NO_COMMENT_PLACEHOLDER,
+            req.sub_type,
+            req.flag,
+            ["👀 申请留言为空，需手动处理"],
+            invited_id=invited_id,
+        )
         return
 
-    answer = req.comment.splitlines()[-1].removeprefix("答案：").strip()  # 从申请留言最后一行提取填写的 UID 答案
     logger.info(f"(cafe) Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
 
     if not answer.isdecimal():  # UID 应为十进制纯数字
@@ -381,13 +595,11 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
         return
 
     uid = int(answer)
-
-    # more sleep is better
-    await random_sleep(3)
+    notice = JoinRequestNotice("Cafe", applicant, answer, req.sub_type, req.flag)
 
     # lstk uid check
     try:
-        uid_exists = await LittleSkinUser.uid_info(uid)
+        uid_exists = await call_with_retry(_MAIN_SERVICE, LittleSkinUser.uid_info, uid)
     except Exception as e:
         # 主站不可用时降级：仍发送申请通知，交由管理员手动处理
         logger.exception(e)
@@ -399,7 +611,7 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
             answer,
             req.sub_type,
             req.flag,
-            ["⚠️ 需手动处理"],
+            [_service_failure_text()],
             invited_id=invited_id,
         )
         return
@@ -423,30 +635,40 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
         return
 
     # general: approve
-    mapping_failed = False
+    result = await _approve_request(bot, notice, source="auto:cafe")
+    if result.outcome == ALREADY_HANDLED:
+        return
+    if result.outcome != SUCCESS:
+        # 审批调用失败过去会抛到 NoneBot，管理员什么也收不到；改为补发人工通知
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.littleskin_cafe,
+            "Cafe",
+            applicant,
+            answer,
+            req.sub_type,
+            req.flag,
+            ["⚠️ 自动同意调用失败，需手动处理"],
+            invited_id=invited_id,
+        )
+        return
+
+    # 审批已完成，映射查询只用于结果播报，失败不影响放人
     message: list[str] = []
     try:
-        mapping_uid = await UIDMapping.fetch(qq=applicant)
+        mapping_uid = await call_with_retry(_MONGO_SERVICE, UIDMapping.fetch, qq=applicant)
         status = "✅" if (mapping_uid and mapping_uid.uid == uid) else "⚠️"  # 检查是否与主群记录的 UID 映射一致
     except Exception as e:
         # 映射数据库不可用不影响审批，仅标记为未知并提示手动核对
         logger.exception(e)
         status = "⚠️"
-        mapping_failed = True
-        message.append("⚠️ 需手动处理")
+        message.append(_mapping_read_failure_text())
 
-    await req.approve(bot)  # 茶馆群只要 UID 存在即自动同意入群
-    if mapping_failed:
-        # 映射查询失败时附上申请通知，方便管理员核对处理
-        message.append(f"(RESULT) Mapping {status}: QQ {applicant} -> UID {uid}")
-        await _send_to_group(S_.defined_qq.littleskin_cafe, "\n\n".join(m for m in message if m))
-    else:
-        await _send_to_group(S_.defined_qq.littleskin_cafe, f"(RESULT) Mapping {status}: QQ {applicant} -> UID {uid}")
+    message.append(f"(RESULT) Mapping {status}: QQ {applicant} -> UID {uid}")
+    await _send_to_group(S_.defined_qq.littleskin_cafe, "\n\n".join(m for m in message if m))
 
 
 # endregion
-
-
 # region member join welcome
 member_join_welcome = on_notice(
     rule=_group_rule(S_.defined_qq.littleskin_main),
@@ -456,14 +678,20 @@ member_join_welcome = on_notice(
 
 
 @member_join_welcome.handle()
-async def _(bot: Bot, event: GroupIncreaseNoticeEvent):
+async def member_join_welcome_handler(bot: Bot, event: GroupIncreaseNoticeEvent):
     if event.user_id == int(bot.self_id):
         return  # 机器人自己入群，不处理
 
     welcome_msg = Message() + MessageSegment.at(event.user_id) + " "
     nofi_msg = [f"用户已入群 > {event.user_id}"]
 
-    uid_mapping = await UIDMapping.fetch(qq=event.user_id)  # 查询新成员已绑定的 UID 信息
+    # 三个外部点各自降级：任一失败只少对应字段，欢迎语与通知始终发送
+    uid_mapping: UIDMapping | None = None
+    try:
+        uid_mapping = await call_with_retry(_MONGO_SERVICE, UIDMapping.fetch, qq=event.user_id)
+    except Exception as e:
+        logger.exception(e)
+        nofi_msg.append(_mapping_read_failure_text())
 
     # add UID info
     if uid_mapping:
@@ -477,7 +705,7 @@ async def _(bot: Bot, event: GroupIncreaseNoticeEvent):
 
     # try to fetch annoucement text from cloudconfig to override the default text
     try:
-        cloudconfig = await CloudConfig.fetch()
+        cloudconfig = await call_with_retry("云控配置", CloudConfig.fetch)
         if cloudconfig.enable_temporary_welcome_message_main:
             # override join announcement if temporary welcome message is enabled
             join_announcement = cloudconfig.temporary_welcome_message_main  # 云控策略启用时优先使用临时欢迎语
@@ -487,23 +715,32 @@ async def _(bot: Bot, event: GroupIncreaseNoticeEvent):
     welcome_msg = welcome_msg + f"\n{join_announcement}"
 
     # send to main group
-    await random_sleep(2)
     await member_join_welcome.send(welcome_msg)
 
     # render image
     image: bytes | None = None  # pre define
 
     if uid_mapping:
-        ltsk_user = await LittleSkinUser.uid_info(uid_mapping.uid)  # 获取 LittleSkin 用户详细信息用于拼装管理审核通知
-        # if qmail verified (only noti)
-        if uid_mapping.qmail_verified:
-            nofi_msg.append("QMAIL ✅ 验证通过")
-        elif ltsk_user:
-            nofi_msg.append(
-                f"QMAIL {'❔ 与 QQ 号不匹配' if ltsk_user.email.lower().endswith('@qq.com') else '❌ 非 QQ 邮箱'}",
-            )
+        ltsk_user: LittleSkinUser | None = None
+        try:
+            ltsk_user = await call_with_retry(_MAIN_SERVICE, LittleSkinUser.uid_info, uid_mapping.uid)
+        except Exception as e:
+            logger.exception(e)
+            nofi_msg.append(_service_failure_text())
 
-        if ltsk_user:
+        if ltsk_user is None:
+            if not any(text.startswith("⚠️") for text in nofi_msg):
+                # UID not exists
+                nofi_msg.append("❌ 这个 UID 根本不存在")
+        else:
+            # if qmail verified (only noti)
+            if uid_mapping.qmail_verified:
+                nofi_msg.append("QMAIL ✅ 验证通过")
+            else:
+                nofi_msg.append(
+                    f"QMAIL {'❔ 与 QQ 号不匹配' if ltsk_user.email.lower().endswith('@qq.com') else '❌ 非 QQ 邮箱'}",
+                )
+
             # check whether email contains uppercase letters (only noti)
             if ltsk_user.email.lower() != ltsk_user.email:
                 nofi_msg.append("⚠️ 邮箱含有大写字母")
@@ -520,17 +757,13 @@ async def _(bot: Bot, event: GroupIncreaseNoticeEvent):
                 nofi_msg.append("❌ 账号被封禁")
 
             # render image
-            render = RenderUserInfo(
-                **ltsk_user.model_dump(), qq=event.user_id, qq_nickname=await get_qq_nickname(bot, event.user_id)
-            )
-            image = await render.get_image()
-        else:
-            # UID not exists
-            nofi_msg.append("❌ 这个 UID 根本不存在")
+            image = await _render_card(bot, ltsk_user, event.user_id)
+            if image is None:
+                nofi_msg.append(_render_failure_text())
     else:
-        nofi_msg.append("🈚 未找到 UIDMapping 信息")
+        if not any(text.startswith("⚠️") for text in nofi_msg):
+            nofi_msg.append("🈚 未找到 UIDMapping 信息")
 
-    await random_sleep(3)
     # send noti to notification channel
     noti = UniMessage()
     if image:

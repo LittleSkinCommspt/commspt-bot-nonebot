@@ -27,7 +27,6 @@ from plugins.commspt_bot.utils.join_action import (
 )
 from plugins.commspt_bot.utils.join_request_notice import JoinRequestNoticeError, parse_join_request_notice
 from plugins.commspt_bot.utils.onebot_message import reply_to
-from plugins.commspt_bot.utils.random_sleep import random_sleep
 
 # 裸命令匹配模式：以「do」开头，不接受任何 COMMAND_START 前缀；
 # reject 的原因仅取单个不含空白的原因词，多词原因不匹配（沿用原行为）。
@@ -71,7 +70,6 @@ async def do_action_join(bot: Bot, event: MessageEvent, groups: dict = RegexDict
         await do_action.send(reply_to(event) + "无法识别申请通知")
         return
 
-    await random_sleep(3)
     result = await execute_join_action(
         bot,
         notice,

@@ -33,7 +33,6 @@ from plugins.commspt_bot.utils.join_action import (
     remember_approval,
 )
 from plugins.commspt_bot.utils.messenger import send_to_group_with_at
-from plugins.commspt_bot.utils.random_sleep import random_sleep
 
 
 def _is_emoji_like(event: NoticeEvent) -> bool:
@@ -144,7 +143,6 @@ async def emoji_approval_handler(bot: Bot, event: NoticeEvent):
         await remember_approval(message_id, notice)
         return
 
-    await random_sleep(2)
     result = await execute_join_action(
         bot,
         notice,

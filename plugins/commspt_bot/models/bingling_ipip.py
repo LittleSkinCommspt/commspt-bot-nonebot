@@ -63,6 +63,7 @@ class BingLingIPIP(BaseModel):
                 verify=VERIFY_CONTENT,
                 base_url=endpoint,
                 http2=True,
+                timeout=httpx.Timeout(connect=3.0, read=5.0, write=5.0, pool=3.0),
             ) as client:
                 resp = await client.get(f"/{ip}")
             scope.response = resp

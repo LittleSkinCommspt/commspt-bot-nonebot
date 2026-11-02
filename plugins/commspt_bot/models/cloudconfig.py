@@ -52,6 +52,7 @@ class CloudConfig(BaseModel):
                 base_url=endpoint,
                 follow_redirects=True,
                 verify=VERIFY_CONTENT,
+                timeout=httpx.Timeout(5.0),
             ) as client:
                 resp = await client.get(_CLOUDCONFIG_PATH)
             scope.response = resp

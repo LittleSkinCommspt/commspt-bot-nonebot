@@ -25,7 +25,6 @@ from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.bingling_ipip import BingLingIPIP
 from plugins.commspt_bot.utils.browserless import screenshot
 from plugins.commspt_bot.utils.relative_time import humanize_since
-from plugins.commspt_bot.utils.retry import call_with_retry
 
 # 使用 PlainSerializer 序列化为 YYYY-MM-DD HH:mm:ss 格式字符串的人类可读时间类型
 HumanReadableTime = Annotated[
@@ -123,7 +122,7 @@ class RenderUserInfo(BaseModel):
             logger.debug("未配置 IP 属地端点，跳过查询")
             return ""
         try:
-            ipip = await call_with_retry("冰凌 IP 属地 API", BingLingIPIP.get, str(self.ip[0]))
+            ipip = await BingLingIPIP.get(str(self.ip[0]))
         except Exception as e:
             logger.warning(f"IP 属地查询失败（卡片显示「未获取」）：{type(e).__name__}: {e}")
             return ""

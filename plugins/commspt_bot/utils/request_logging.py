@@ -749,6 +749,24 @@ _DEPTH: ContextVar[int] = ContextVar("commspt_request_log_depth", default=0)
 _SUPPRESS_DEPTH: ContextVar[int] = ContextVar("commspt_request_log_suppress", default=0)
 """重试抑制层级：>0 表示当前不允许落盘。"""
 
+_ATTEMPT: ContextVar[tuple[int, int] | None] = ContextVar("commspt_request_log_attempt", default=None)
+"""当前尝试进度 ``(第几次, 共几次)``；由传输层重试在每次尝试前设置，未重试时为 None。"""
+
+
+def _current_attempt() -> tuple[int, int] | None:
+    """读取当前尝试进度（用于给失败记录补上「尝试=N/M」字段）。"""
+    return _ATTEMPT.get()
+
+
+def set_attempt_progress(attempt: int, attempts: int) -> None:
+    """设置当前尝试进度，供传输层重试在每次发包前调用。"""
+    _ATTEMPT.set((attempt, attempts))
+
+
+def reset_attempt_progress() -> None:
+    """清除尝试进度（一次请求结束后调用，避免污染同一任务里的后续调用）。"""
+    _ATTEMPT.set(None)
+
 
 def _acquire_recorder() -> tuple[_Recorder, Any]:
     """获取当前逻辑操作的记录状态；返回 ``(recorder, token)``，token 非 None 时需 reset。"""
@@ -828,6 +846,7 @@ def _build_failure(recorder: _Recorder, scope: RequestScope, exc: BaseException)
         status=status,
         reason=_classify_reason(exc),
         detail=_safe_detail(exc),
+        attempt=_current_attempt(),
         exc=exc,
     )
 

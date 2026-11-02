@@ -17,15 +17,15 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, cast
+from typing import Any
 
 import httpx
 from nonebot import logger
 from pydantic import BaseModel
 
-from plugins.commspt_bot.config import S_, VERIFY_CONTENT
+from plugins.commspt_bot.config import S_
+from plugins.commspt_bot.utils.httpx_retry import async_client
 from plugins.commspt_bot.utils.request_logging import external_request
-from plugins.commspt_bot.utils.retry import call_with_retry
 
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
 """飞书开放平台 API 根地址。"""
@@ -185,8 +185,12 @@ class FeishuBitable:
 
     @staticmethod
     def _client() -> httpx.AsyncClient:
-        """构造带统一超时与 TLS 配置的异步客户端。"""
-        return httpx.AsyncClient(timeout=15.0, verify=VERIFY_CONTENT, follow_redirects=True)
+        """构造带统一超时与 TLS 配置的异步客户端（挂载统一重试传输层）。
+
+        飞书的写入接口自身幂等：``client_token`` 在整次逻辑请求内固定不变，
+        服务端据此去重，因此允许重试 POST。
+        """
+        return async_client(FEISHU_SERVICE, allow_post=True, timeout=15.0, follow_redirects=True)
 
     @staticmethod
     async def _get_token(force_refresh: bool = False) -> str:
@@ -212,10 +216,7 @@ class FeishuBitable:
         address = f"{FEISHU_BASE_URL}{TOKEN_PATH}"
         # 作用域涵盖「请求 -> JSON 解析 -> 业务 code 判定 -> token 字段校验」
         with external_request(FEISHU_TOKEN_SERVICE, address, method="POST") as scope:
-            resp = cast(
-                httpx.Response,
-                await call_with_retry(FEISHU_TOKEN_SERVICE, FeishuBitable._post_token, app_id, app_secret),
-            )
+            resp = await FeishuBitable._post_token(app_id, app_secret)
             scope.response = resp
             payload = resp.json()
             if int(payload.get("code", -1)) != 0 or resp.status_code >= 400:
@@ -289,10 +290,7 @@ class FeishuBitable:
         ) as scope:
             for attempt in (1, 2):
                 token = await cls._get_token(force_refresh=attempt == 2)
-                resp = cast(
-                    httpx.Response,
-                    await call_with_retry(FEISHU_SERVICE, cls._send, method, path, token, **kwargs),
-                )
+                resp = await cls._send(method, path, token, **kwargs)
                 scope.response = resp
 
                 if resp.status_code >= 400:

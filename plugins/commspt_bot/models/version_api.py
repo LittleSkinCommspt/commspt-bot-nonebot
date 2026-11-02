@@ -12,7 +12,6 @@
 from datetime import datetime
 from typing import Annotated
 
-import httpx
 from pydantic import (
     AliasGenerator,
     BaseModel,
@@ -23,7 +22,7 @@ from pydantic import (
 from pydantic.fields import Field
 from pydantic.networks import AnyHttpUrl
 
-from plugins.commspt_bot.config import VERIFY_CONTENT
+from plugins.commspt_bot.utils.httpx_retry import async_client
 from plugins.commspt_bot.utils.request_logging import external_request
 
 _CSL_RELEASES_URL = "https://api.github.com/repos/CustomSkinLoader/CustomSkinLoader/releases/latest"
@@ -65,7 +64,7 @@ class CustomSkinLoaderLatest(BaseModel):
         """
         # 请求日志作用域覆盖「请求 + 响应解析」：状态码与 JSON / 模型校验失败都会落盘
         with external_request("GitHub Releases API", _CSL_RELEASES_URL) as scope:
-            async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
+            async with async_client("GitHub Releases API") as client:
                 response = await client.get(_CSL_RELEASES_URL)
                 scope.response = response
                 return cls(**response.raise_for_status().json())
@@ -96,7 +95,7 @@ class AuthlibInjectorLatest(BaseModel):
         """
         # 请求日志作用域覆盖「请求 + 响应解析」：状态码与 JSON / 模型校验失败都会落盘
         with external_request("authlib-injector 制品 API", _AUTHLIB_INJECTOR_URL) as scope:
-            async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
+            async with async_client("authlib-injector 制品 API") as client:
                 response = await client.get(_AUTHLIB_INJECTOR_URL)
                 scope.response = response
                 return cls(**response.raise_for_status().json())
@@ -159,7 +158,7 @@ class LibericaJavaLatest(BaseModel):
         kwargs = {key.replace("_", "-"): value for key, value in kwargs.items()}
         # 请求日志作用域覆盖「请求 + 响应解析」：状态码与 JSON / 模型校验失败都会落盘
         with external_request("BellSoft Liberica API", _LIBERICA_RELEASES_URL) as scope:
-            async with httpx.AsyncClient(verify=VERIFY_CONTENT) as client:
+            async with async_client("BellSoft Liberica API") as client:
                 response = await client.get(_LIBERICA_RELEASES_URL, params=kwargs)
                 scope.response = response
                 return libereca_releases.validate_python(response.raise_for_status().json())

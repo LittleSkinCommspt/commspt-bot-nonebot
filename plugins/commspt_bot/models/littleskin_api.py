@@ -23,7 +23,8 @@ from pydantic import (
     field_validator,
 )
 
-from plugins.commspt_bot.config import S_, VERIFY_CONTENT
+from plugins.commspt_bot.config import S_
+from plugins.commspt_bot.utils.httpx_retry import async_client
 from plugins.commspt_bot.utils.request_logging import external_request
 
 _LITTLESKIN_ADMIN_USERS_URL = "https://littleskin.cn/api/admin/users"
@@ -77,15 +78,14 @@ class LittleSkinUser(BaseModel):
         # 使用配置的管理员 Token 进行 Bearer 鉴权，并开启 HTTP/2
         # 请求日志作用域覆盖「请求 + 响应解析」：状态码校验与 JSON / 模型校验失败都会落盘
         with external_request(_LITTLESKIN_ADMIN_SERVICE, _LITTLESKIN_ADMIN_USERS_URL) as scope:
-            async with httpx.AsyncClient(
-                http2=True,
+            async with async_client(
+                _LITTLESKIN_ADMIN_SERVICE,
                 headers={"Authorization": f"Bearer {S_.littleskin_admin_token}"},
-                verify=VERIFY_CONTENT,
                 timeout=httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0),
             ) as client:
                 api = await client.get(_LITTLESKIN_ADMIN_USERS_URL, params={"q": query_string})
                 scope.response = api
-                # 显式校验状态码：401/403 等 4xx 快速失败（不重试），5xx/429 交由重试层处理
+                # 显式校验状态码：401/403 等 4xx 快速失败（不重试），5xx/429 由传输层重试
                 api.raise_for_status()
                 if data := api.json()["data"]:
                     return cls(**data[0])

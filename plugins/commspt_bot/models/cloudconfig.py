@@ -14,7 +14,8 @@ from typing import Annotated, Self
 import httpx
 from pydantic import BaseModel, Field
 
-from plugins.commspt_bot.config import S_, VERIFY_CONTENT
+from plugins.commspt_bot.config import S_
+from plugins.commspt_bot.utils.httpx_retry import async_client
 from plugins.commspt_bot.utils.request_logging import external_request
 
 _CLOUDCONFIG_SERVICE = "云控配置"
@@ -46,12 +47,11 @@ class CloudConfig(BaseModel):
         url = f"{endpoint.rstrip('/')}{_CLOUDCONFIG_PATH}"
         # 请求日志作用域覆盖「请求 + 响应解析」：状态码、JSON 与模型校验失败都会被记录
         with external_request(_CLOUDCONFIG_SERVICE, url) as scope:
-            # 启用 HTTP/2 与自动重定向请求云控服务端点
-            async with httpx.AsyncClient(
-                http2=True,
+            # 启用统一重试传输层与自动重定向请求云控服务端点
+            async with async_client(
+                _CLOUDCONFIG_SERVICE,
                 base_url=endpoint,
                 follow_redirects=True,
-                verify=VERIFY_CONTENT,
                 timeout=httpx.Timeout(5.0),
             ) as client:
                 resp = await client.get(_CLOUDCONFIG_PATH)

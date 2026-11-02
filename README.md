@@ -102,7 +102,7 @@ cp config.yml.example config.yml
 | `DB_MONGO__CONNECT_TIMEOUT_MS` / `__SERVER_SELECTION_TIMEOUT_MS` / `__SOCKET_TIMEOUT_MS` | MongoDB 客户端超时（毫秒，默认 5000 / 10000 / 10000）。连接串中已显式声明的同名选项优先 |
 | `API_BROWSERLESS__ENDPOINT` | browserless 截图服务（`BROWSERLESS_MODE=REMOTE` 时使用） |
 | `BROWSERLESS_MODE` | 出图后端：`REMOTE`（默认，调用远程 Browserless）或 `LOCAL`（本地 Playwright 渲染）。`LOCAL` 需先安装可选依赖与浏览器内核：`uv sync --extra render-local && uv run playwright install chromium`，并自行准备 `assets/browserless/` 下的本地资源（含字体，详见下文「本地渲染」小节） |
-| `FAILED_RETRY_TIME` | 外部网络服务请求失败后的重试次数（默认 `2`，即合计最多 3 次请求；`0` 表示不重试）。生效于 `&ygg` / `&pro` / `&user` / `&uid` 以及入群申请链路（主站查询、映射数据库读写、云控拉取、IP 属地）。审批动作、消息发送、渲染类服务（SkinRenderMC / Browserless / 本地 Playwright）与 QQ 协议端调用不重试 |
+| `FAILED_RETRY_TIME` | 外部网络服务请求失败后的重试次数（默认 `2`，即合计最多 3 次请求；`0` 表示不重试）。HTTP 请求的重试在传输层统一实现（主站管理端 API、IP 属地、云控、CSL、飞书、版本查询）；映射数据库（MongoDB）与 Yggdrasil SDK 仍由调用层重试。审批动作、消息发送、渲染类服务（SkinRenderMC / Browserless / 本地 Playwright）与 QQ 协议端调用不重试 |
 | `API_SKINRENDERMC__ENDPOINT` | 皮肤渲染服务 |
 | `API_CLOUDCONFIG` | 云控配置（JSON 对象） |
 | `API_FEISHU__APP_ID` / `API_FEISHU__APP_SECRET` | 飞书自建应用凭证（`&banlog` 写多维表格用），见[飞书封禁记录](#feishu-ban-record) |
@@ -214,6 +214,19 @@ request_logging:
 - 「查无此人」等业务性结果不算请求失败，不落盘；
 - 日志实现**不改变现有重试策略**（`FAILED_RETRY_TIME` 的语义与生效范围保持不变，见上方配置项说明）。
 - 入群申请链路同样遵循上述规则：单个外部调用重试耗尽才落盘一次，其余环节成功则不记录。
+
+##### HTTP 请求重试
+
+HTTP 重试由 `httpx-retries` 在传输层统一实现（`plugins/commspt_bot/utils/httpx_retry.py`），业务代码不再手工包裹重试。
+
+- **次数**：严格取自 `FAILED_RETRY_TIME`（1 次请求 + N 次重试）。`httpx-retries` 的 `total` 语义正是「首次之外的重试次数」，与配置语义一致，无需换算。
+- **范围**：主站管理端 API、IP 属地、云控配置、LittleSkin CSL、飞书 API、版本查询（GitHub / authlib-injector / BellSoft）。映射数据库与 Yggdrasil SDK 不走 HTTP 传输层，仍由 `call_with_retry` 重试。
+- **触发条件**：HTTP 429 与全部 5xx；4xx（429 除外）快速失败。`httpx-retries` 默认只认 429 / 502 / 503 / 504，本项目显式枚举 500–599 以保持原有语义。
+- **间隔**：指数退避（首次 1 秒、第二次 2 秒…），单次等待上限 10 秒，累计等待预算 `N × 10` 秒。关闭抖动以保证行为可预测。
+- **`Retry-After`**：服务端给出的等待时间优先于指数退避，但同样受 10 秒上限截断，避免被超大值拖住。
+- **方法**：仅重试 GET / HEAD / OPTIONS / PUT / DELETE / TRACE。POST 默认不重试（避免非幂等副作用）；飞书写入接口单独放开，因为其 `client_token` 在整次逻辑请求内固定不变、服务端据此去重。
+- **不重试响应解析**：传输层只重发 HTTP 请求，`response.json()` 与 pydantic 校验在传输层之外只执行一次。因此「响应体截断导致解析失败」不会被重试，这类问题由调用方按业务失败处理。
+- **TLS 与 HTTP/2**：改由内层 `httpx.AsyncHTTPTransport(verify=VERIFY_CONTENT, http2=True)` 承担。`httpx.AsyncClient` 一旦显式传入 `transport=`，会忽略 `verify` / `http2` / `limits` / `cert`，这些参数必须写在 transport 上，否则会静默降级为系统证书 + HTTP/1.1。
 
 #### 写入失败的兜底
 

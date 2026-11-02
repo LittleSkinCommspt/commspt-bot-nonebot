@@ -54,7 +54,7 @@ async def _user_info(bot: Bot, uid: Match[int]):
     logger.info(f"Looking for user info uid={uid.result}")
     try:
         # 调用 LittleSkin API 获取用户公开信息（失败自动重试，仅重跑本次调用）
-        ltsk_user = await call_with_retry("LittleSkin 管理端 API", LittleSkinUser.uid_info, uid.result)
+        ltsk_user = await LittleSkinUser.uid_info(uid.result)
         # 从 MongoDB 查询 UID 绑定的 QQ 号（失败自动重试）
         mapping_qq = await call_with_retry("MongoDB 映射数据库", UIDMapping.fetch, uid=uid.result)
     except Exception as e:

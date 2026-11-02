@@ -168,7 +168,10 @@ async def _approve_request(
 
 
 async def _write_mapping(uid: int, qq: int, *, qmail_verified: bool = False) -> bool:
-    """best-effort 写入 QQ↔UID 映射；失败只记日志并返回 False。"""
+    """best-effort 写入 QQ↔UID 映射；失败只记日志并返回 False。
+
+    映射数据库不是 HTTP 调用，重试仍由 ``call_with_retry`` 负责。
+    """
     try:
         await call_with_retry(
             _MONGO_SERVICE,
@@ -356,7 +359,7 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
     auto_accept = False
     cloudconfig_failed = False
     try:
-        cloudconfig = await call_with_retry("云控配置", CloudConfig.fetch)
+        cloudconfig = await CloudConfig.fetch()
         auto_accept = cloudconfig.enable_auto_accept_join_request_main
     except Exception as e:
         logger.exception(e)
@@ -394,7 +397,7 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
 
     # ---- ② QMail 校验（唯一一次请求，结果同时用于候选 UID 提示）----
     try:
-        email_uid = await call_with_retry(_MAIN_SERVICE, LittleSkinUser.qmail_api, applicant)
+        email_uid = await LittleSkinUser.qmail_api(applicant)
     except Exception as e:
         logger.exception(e)
         await _send_approval_notice(
@@ -444,7 +447,7 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
 
     # ---- ③ UID 存在性校验（唯一一次请求，结果同时用于出图）----
     try:
-        ltsk_user = await call_with_retry(_MAIN_SERVICE, LittleSkinUser.uid_info, uid)
+        ltsk_user = await LittleSkinUser.uid_info(uid)
     except Exception as e:
         logger.exception(e)
         await _send_approval_notice(
@@ -599,7 +602,7 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
 
     # lstk uid check
     try:
-        uid_exists = await call_with_retry(_MAIN_SERVICE, LittleSkinUser.uid_info, uid)
+        uid_exists = await LittleSkinUser.uid_info(uid)
     except Exception as e:
         # 主站不可用时降级：仍发送申请通知，交由管理员手动处理
         logger.exception(e)
@@ -705,7 +708,7 @@ async def member_join_welcome_handler(bot: Bot, event: GroupIncreaseNoticeEvent)
 
     # try to fetch annoucement text from cloudconfig to override the default text
     try:
-        cloudconfig = await call_with_retry("云控配置", CloudConfig.fetch)
+        cloudconfig = await CloudConfig.fetch()
         if cloudconfig.enable_temporary_welcome_message_main:
             # override join announcement if temporary welcome message is enabled
             join_announcement = cloudconfig.temporary_welcome_message_main  # 云控策略启用时优先使用临时欢迎语
@@ -723,7 +726,7 @@ async def member_join_welcome_handler(bot: Bot, event: GroupIncreaseNoticeEvent)
     if uid_mapping:
         ltsk_user: LittleSkinUser | None = None
         try:
-            ltsk_user = await call_with_retry(_MAIN_SERVICE, LittleSkinUser.uid_info, uid_mapping.uid)
+            ltsk_user = await LittleSkinUser.uid_info(uid_mapping.uid)
         except Exception as e:
             logger.exception(e)
             nofi_msg.append(_service_failure_text())

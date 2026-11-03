@@ -637,6 +637,49 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
         )
         return
 
+    # 仅依据主站当前封禁状态；不把飞书历史封禁记录作为拒绝依据。
+    if uid_exists.permission == -1 and S_.cafe_banned_user_action == "manual":
+        await _send_approval_notice(
+            bot,
+            S_.defined_qq.littleskin_cafe,
+            "Cafe",
+            applicant,
+            answer,
+            req.sub_type,
+            req.flag,
+            ["⚠️ 已被封禁用户，需手动处理"],
+            invited_id=invited_id,
+        )
+        return
+
+    if uid_exists.permission == -1 and S_.cafe_banned_user_action == "reject":
+        result = await execute_join_action(
+            bot,
+            notice,
+            approve=False,
+            reason="该 LittleSkin 账号已被封禁",
+            source="auto:cafe:banned",
+        )
+        if result.outcome == SUCCESS:
+            # 已消费的申请只播报结果，不登记人工审批凭证或贴审批表情。
+            await _send_to_group(
+                S_.defined_qq.littleskin_cafe,
+                f"👆 已拒绝 [LittleSkin 账号被封禁]：QQ {applicant} -> UID {uid}",
+            )
+        elif result.outcome != ALREADY_HANDLED:
+            await _send_approval_notice(
+                bot,
+                S_.defined_qq.littleskin_cafe,
+                "Cafe",
+                applicant,
+                answer,
+                req.sub_type,
+                req.flag,
+                ["⚠️ 账号被封禁，自动拒绝调用失败，需手动处理"],
+                invited_id=invited_id,
+            )
+        return
+
     # general: approve
     result = await _approve_request(bot, notice, source="auto:cafe")
     if result.outcome == ALREADY_HANDLED:

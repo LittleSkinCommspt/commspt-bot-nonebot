@@ -97,6 +97,7 @@ cp config.yml.example config.yml
 | `DEFINED_QQ__DEV_GROUP` | 开发群群号 |
 | `admin_list`（`config.yml`） | 管理员 QQ 列表（YAML 数组） |
 | `request_logging`（`config.yml`） | 请求日志开关与目录：`enabled`（默认 `true`）、`directory`（默认 `./logs/commspt-bot/`），见[请求日志](#request-logging) |
+| `CAFE_BANNED_USER_ACTION` | 咖啡馆封禁账号的审核策略：`accept`（默认，保持原有自动同意）、`reject`（自动拒绝）、`manual`（人工审核）；修改后重启生效，不影响主群 |
 | `LITTLESKIN_ADMIN_TOKEN` | LittleSkin Admin API Token |
 | `DB_MONGO__URL` | MongoDB 连接串（QQ↔UID 映射） |
 | `DB_MONGO__CONNECT_TIMEOUT_MS` / `__SERVER_SELECTION_TIMEOUT_MS` / `__SOCKET_TIMEOUT_MS` | MongoDB 客户端超时（毫秒，默认 5000 / 10000 / 10000）。连接串中已显式声明的同名选项优先 |
@@ -333,6 +334,14 @@ HTTP 重试由 `httpx-retries` 在传输层统一实现（`plugins/commspt_bot/u
 当入群申请无法自动处理（答案为非纯数字、UID 不存在、Admin API 查询失败等）时，机器人会把申请详情发到管理群（主群 → `commspt_group`，茶馆群 → `littleskin_cafe`），并为该通知消息贴上 👍 / 👎 引导表情，供管理员审批。
 
 申请人始终显示事件原始的 `user_id`；若事件携带整数类型的 `invited_id`（包括 `0`），则追加候选提示，例如 `申请人 0 (也可能是: 123456)`。该提示不要求 `user_id` 为零，也不会把 `invited_id` 当作已确认的申请人或用于 QQ/UID 映射。当原始 `user_id=0` 时，主群与茶馆群均不自动批准，而是发送上述人工审核通知；主群云控自动同意策略也不能绕过此限制。
+
+咖啡馆默认仍按 UID 存在性自动同意。可在 `.env` 配置 `CAFE_BANNED_USER_ACTION`，修改后重启机器人生效：
+
+- `accept`（默认）：保持原有行为，不因封禁状态改变自动审核结果。
+- `reject`：申请所填 UID 经主站查询确认为当前封禁状态（`permission == -1`）时自动拒绝；成功只发纯文本结果，不挂人工审批凭证。
+- `manual`：被封禁账号转入现有人工审核，通知明确标注「已被封禁用户」，管理员可使用 👍/👎 表情或 `do accept` / `do reject` 处理。
+
+上述咖啡馆通知只标注封禁状态，不查询或展示封禁原因、飞书封禁记录，也不发送用户信息卡。策略不影响主群审核。UID 不存在、查询失败、空留言或申请人 `user_id=0` 等情况仍转人工；自动拒绝调用失败时转人工处理，不会继续自动同意。
 
 每个外部依赖（主站管理端 API、映射数据库、云控配置、IP 属地、出图、飞书封禁记录）都独立降级：任一环节失败只影响该环节，且不会再把整条申请笼统报成「主站/映射数据库服务请求失败」。可靠性相关的行为：
 

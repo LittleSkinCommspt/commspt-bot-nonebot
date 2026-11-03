@@ -205,6 +205,10 @@ class Setting(BaseModel):
     # 环境变量 BROWSERLESS_MODE（LOCAL 需安装可选依赖 render-local 并执行 playwright install chromium）
     browserless_mode: Literal["REMOTE", "LOCAL"] = "REMOTE"
 
+    # 咖啡馆申请所填 UID 被封禁时的处理：accept / reject / manual。
+    # 默认 accept，保持原有 UID 存在即自动同意的行为。
+    cafe_banned_user_action: Literal["accept", "reject", "manual"] = "accept"
+
     # 用户信息卡按北京时间自动切换主题；关闭后跟随被查询账户的 is_dark_mode。
     user_card_auto_theme: bool = True
 

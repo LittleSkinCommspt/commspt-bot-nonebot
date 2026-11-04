@@ -691,7 +691,7 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
     # 审批已完成，UID 取自申请答案（审批时已登记），不回查映射库
     await _send_to_group(
         S_.defined_qq.littleskin_cafe,
-        f"(RESULT) QQ {applicant} -> UID {uid}（来自申请答案，未核对主群映射）",
+        f"(RESULT) QQ {applicant} -> UID {uid}",
     )
 
 

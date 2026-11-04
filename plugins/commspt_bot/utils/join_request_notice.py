@@ -23,10 +23,13 @@ class JoinRequestNoticeError(ValueError):
 # 解析使用 search 以容忍生产者拼在通知前后的提示行与图片 CQ 段。
 # 申请人行的括号后缀为可选候选提示（事件携带 invited_id 时由 formatter 追加），
 # 语义等价于旧版式：解析结果中的 applicant 始终是原始的申请人数字，候选 ID 仅作展示。
+# 答案行允许为空（无留言的申请走「答案不是纯数字」人工分支），
+# 分隔空格用 ` *` 匹配，兼容平台裁掉行尾空白的情况；历史上「（无留言）」
+# 等占位文本仍按普通答案解析，不新增任何填补逻辑。
 _NOTICE_PATTERN = re.compile(
     r"新的入群申请 \((?P<kind>Main|Cafe)\)\n"
     r"» 申请人 (?P<applicant>[0-9]+)(?: \(也可能是: -?[0-9]+\))?\n"
-    r"» 答案     (?P<answer>[^\r\n]+)\n"
+    r"» 答案 *(?P<answer>[^\r\n]*)\n"
     r"\nid=(?P<sub_type>add|invite)_(?P<flag>[^\s_\x00-\x1f\x7f]+)"
     r"(?=[\r\n]|$)",
 )

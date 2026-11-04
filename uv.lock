@@ -808,6 +808,7 @@ dependencies = [
     { name = "arrow" },
     { name = "email-validator" },
     { name = "httpx", extra = ["http2", "socks"] },
+    { name = "httpx-retries" },
     { name = "jinja2" },
     { name = "motor" },
     { name = "nb-cli" },
@@ -839,6 +840,7 @@ requires-dist = [
     { name = "arrow", specifier = ">=1.3.0" },
     { name = "email-validator", specifier = ">=2.1.0.post1" },
     { name = "httpx", extras = ["http2", "socks"], specifier = ">=0.26.0" },
+    { name = "httpx-retries", specifier = ">=0.6.0" },
     { name = "jinja2", specifier = ">=3.1.3" },
     { name = "motor", specifier = ">=3.3.2" },
     { name = "nb-cli", specifier = ">=1.7.4" },
@@ -1272,6 +1274,18 @@ http2 = [
 ]
 socks = [
     { name = "socksio" },
+]
+
+[[package]]
+name = "httpx-retries"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e9/d3/b7a8bb09543af40009717a08a2ceba90b6d4c6f0cdf171404217d8f4c37d/httpx_retries-0.6.0.tar.gz", hash = "sha256:3e0b404969a564829d368417964fd21e6b400a10d17c92d29b8bc247ce8186e3", size = 21122, upload-time = "2026-07-06T00:52:30.093Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/56/c6/7f3d6ab3549267a1959161b38df4c0fb435eceaf2d531d8addfac01abaca/httpx_retries-0.6.0-py3-none-any.whl", hash = "sha256:d1e52a8f68a5df42de75ab89049d5020b2d0ab2f5f8bceacda008d12aa1257a3", size = 11776, upload-time = "2026-07-06T00:52:31.033Z" },
 ]
 
 [[package]]

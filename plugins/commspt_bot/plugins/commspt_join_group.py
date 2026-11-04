@@ -92,11 +92,6 @@ def _invited_id_of(req: GroupRequestEvent) -> int | None:
     return None
 
 
-# 无留言（含 user_id == 0）时使用的占位答案，保证通知格式仍可被解析
-_NO_COMMENT_PLACEHOLDER = "（无留言）"
-# 兼容旧名：语义已扩展为「无留言」，零申请人与空留言共用同一占位
-_ZERO_APPLICANT_ANSWER_PLACEHOLDER = _NO_COMMENT_PLACEHOLDER
-
 _ANSWER_PREFIXES = ("答案：", "答案:")
 """申请留言的答案前缀（全角/半角冒号都兼容）。"""
 
@@ -106,6 +101,9 @@ def _extract_answer(comment: str | None) -> str:
 
     QQ 留言常带尾随空行，直接取 ``splitlines()[-1]`` 会得到空串并被误判为
     「答案不是纯数字」。这里从后往前找第一个非空白行，并剥离全角/半角冒号前缀。
+
+    无留言**不填补占位符**：空串原样返回，由下游 ``isdecimal`` 判定统一走
+    「答案不是纯数字」的人工审核分支。
     """
     for line in reversed((comment or "").splitlines()):
         text = line.strip()
@@ -294,7 +292,7 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             S_.defined_qq.commspt_group,
             "Main",
             applicant,
-            answer or _NO_COMMENT_PLACEHOLDER,
+            answer,
             req.sub_type,
             req.flag,
             ["👀 申请人 user_id 为 0，需手动处理"],
@@ -303,22 +301,6 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
         return
 
     answer = _extract_answer(req.comment)
-    if not answer:
-        # 空留言过去直接 return，申请人会永久卡住且管理员无感知；改为转人工
-        logger.warning(f"(main) request from {applicant} has no answer, falling back to manual review.")
-        await _send_approval_notice(
-            bot,
-            S_.defined_qq.commspt_group,
-            "Main",
-            applicant,
-            _NO_COMMENT_PLACEHOLDER,
-            req.sub_type,
-            req.flag,
-            ["👀 申请留言为空，需手动处理"],
-            invited_id=invited_id,
-        )
-        return
-
     logger.info(f"Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
 
     if not answer.isdecimal():  # UID 应为十进制纯数字
@@ -541,7 +523,7 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
             S_.defined_qq.littleskin_cafe,
             "Cafe",
             applicant,
-            answer or _NO_COMMENT_PLACEHOLDER,
+            answer,
             req.sub_type,
             req.flag,
             ["👀 申请人 user_id 为 0，需手动处理"],
@@ -550,22 +532,6 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
         return
 
     answer = _extract_answer(req.comment)
-    if not answer:
-        # 空留言过去直接 return，申请人会永久卡住且管理员无感知；改为转人工
-        logger.warning(f"(cafe) request from {applicant} has no answer, falling back to manual review.")
-        await _send_approval_notice(
-            bot,
-            S_.defined_qq.littleskin_cafe,
-            "Cafe",
-            applicant,
-            _NO_COMMENT_PLACEHOLDER,
-            req.sub_type,
-            req.flag,
-            ["👀 申请留言为空，需手动处理"],
-            invited_id=invited_id,
-        )
-        return
-
     logger.info(f"(cafe) Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
 
     if not answer.isdecimal():  # UID 应为十进制纯数字

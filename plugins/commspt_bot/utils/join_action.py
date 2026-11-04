@@ -186,7 +186,7 @@ async def execute_join_action(
                     applicant=notice.applicant,
                 )
         else:
-            # 答案不是有效 UID（占位符 / 申请人 user_id 为 0）：不猜、不落账，但仍放人
+            # 答案不是有效 UID（空串 / 非数字 / 申请人 user_id 为 0）：不猜、不落账，但仍放人
             logger.info(
                 "join uid skipped: kind={kind} applicant={applicant} answer={answer} "
                 "(答案非有效 UID，欢迎通知将不带 UID)",

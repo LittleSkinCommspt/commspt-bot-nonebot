@@ -34,12 +34,13 @@ plugins/commspt_bot/              # 父插件（共享层）
 ├── utils/
 │   ├── adv_filter.py             # 群白名单 / 管理员 规则与权限
 │   ├── messenger.py              # 跨群发送工具
-│   ├── join_action.py            # 入群审批公共执行核心 + 表情审批凭证索引
+│   ├── join_action.py            # 入群审批公共执行核心（先写库/登记再放人）+ 表情审批凭证索引
+│   ├── join_ledger.py            # 批准瞬间的 QQ→UID 内存登记（欢迎通知据此出卡，不查库）
 │   ├── join_request_notice.py    # 入群申请通知的格式化与解析
 │   ├── browserless.py            # Jinja2 渲染 → Browserless 远程 / 本地 Playwright 截图
 │   ├── onebot_message.py         # 原生命令匹配 / 参数解析 / 引用回复工具
 │   ├── skinrendermcapi.py        # 皮肤渲染 + 水印
-│   ├── mongodb_manager.py        # UID 映射读写
+│   ├── mongodb_manager.py        # UID 映射读写（含审批前置的 upsert_uid_mapping）
 │   ├── ban_lookup.py             # 按 UID 查询封禁记录（&user / 入群通知复用）
 │   ├── ban_record.py             # &banlog 参数解析与表格列名映射（纯函数）
 │   └── random_sleep.py           # 随机延时（拟人化）
@@ -347,10 +348,18 @@ HTTP 重试由 `httpx-retries` 在传输层统一实现（`plugins/commspt_bot/u
 
 - 重试严格遵循 `FAILED_RETRY_TIME`（1 次请求 + N 次重试，`0` 表示不重试），主站查询、映射数据库读写、云控拉取、IP 属地查询均适用；审批动作本身不重试。
 - 申请留言为空（`None` / 空串 / 纯空白 / 只有 `答案：`）时转人工审核，不会因为取不到 UID 而丢单。
-- QMail 校验通过即自动同意；若随后映射写入失败，仍照常自动同意，只补发一条纯文本提示，建议用 `&setuid` 补写映射。
+- **批准顺序固定为「先写库，再放人」**：所有批准动作（云控自动同意、QMail 直通、`do accept`、👍 表情）都汇聚到同一执行核心，先在内存里登记 `QQ → UID`（取自申请答案），再把映射 upsert 到 MongoDB，最后才调用 `set_group_add_request`。原因是放人会在同一秒内触发 `group_increase`，欢迎通知随即要读这个 UID；写入排在审批之后就会稳定读到空。
+- 映射写入是 **best-effort**：单次尝试、总耗时最多 5 秒，超时或失败仍照常放人，只在结果通知里补一条「映射写入失败，请用 `&setuid` 补写」。
+- 只有**主群**批准会写入 MongoDB 台账；茶馆群只校验 UID 是否存在，写入未经验证的自报 UID 会覆盖主群已核实的数据，因此茶馆批准只在内存登记、供结果播报使用。
+- 云控自动同意写入的台账 `qmail_verified=false`（本次未做 QMail 校验），QMail 直通写入 `true`。
 - 云控拉取失败时**不使用任何缓存或历史值**，仅跳过云控自动同意路径；QMail 的确定性校验仍然生效。
 - IP 属地查询失败只让通知卡片显示「未获取」，不影响出图与审批。
 - 审批动作前没有任何人为延时。
+
+新成员欢迎通知**完全不访问映射数据库**（这里的读写竞态已由「先写库、再放人」+ 进程内登记表消除）：
+
+- 有审批登记时，用登记里的 UID 出卡并播报 `UID: xxx（来自入群申请答案）`；`QMAIL ✅` 只在该 UID 通过过 QMail 校验时出现。
+- 无登记时（管理员直接拉人、免审邀请、Bot 重启过，或申请未填有效 UID），只 `@` 用户发送欢迎语，不查询主站、不查询映射库，也不向通知群播报半截信息。需要时管理员可自行用 `&uid` / `&user` 查询。
 
 管理员有两种等价的操作方式，二者共用同一执行核心，同一条申请只会被处理一次：
 

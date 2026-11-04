@@ -14,8 +14,12 @@
 - 重试统一走 ``call_with_retry``，次数严格由 ``S_.failed_retry_time`` 决定
   （1 次请求 + N 次重试），本模块不写死任何重试次数；
 - 「是否放人」只由确定性身份校验（云控策略 / QMail 匹配 / UID 存在性）决定，
-  映射写入、IP 属地、出图、封禁查询等展示或记录环节一律 best-effort；
+  出图、封禁查询等展示环节一律 best-effort；
 - 审批调用统一走 ``utils.join_action.execute_join_action``，失败不再静默丢弃；
+- 映射台账只在审批执行核心里写，且严格位于放人之前（见 ``execute_join_action``）：
+  放人会立刻触发 ``group_increase``，欢迎通知随即读取 UID，后写必然读到空；
+- 新成员欢迎通知**不访问映射数据库**：UID 取自审批时登记的进程内表
+  （``utils.join_ledger``），未命中时只 @ 用户发欢迎语，不做任何外部查询；
 - 已自动同意的结果通知使用纯文本发送，不贴审批表情、不登记审批凭证。
 """
 
@@ -36,7 +40,6 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.cloudconfig import CloudConfig
 from plugins.commspt_bot.models.littleskin_api import LittleSkinUser
-from plugins.commspt_bot.models.mongodb_data import UIDMapping
 from plugins.commspt_bot.models.render_user_info import RenderUserInfo
 from plugins.commspt_bot.utils.ban_lookup import banned_records_block
 from plugins.commspt_bot.utils.command_prefix import display_command
@@ -48,6 +51,7 @@ from plugins.commspt_bot.utils.join_action import (
     execute_join_action,
     remember_approval,
 )
+from plugins.commspt_bot.utils.join_ledger import get_join_uid
 from plugins.commspt_bot.utils.join_request_notice import (
     JoinRequestNotice,
     NoticeKind,
@@ -57,13 +61,6 @@ from plugins.commspt_bot.utils.join_request_notice import (
 from plugins.commspt_bot.utils.messenger import send_to_group as _send_to_group
 from plugins.commspt_bot.utils.messenger import send_to_group_with_id as _send_to_group_with_id
 from plugins.commspt_bot.utils.qq_profile import get_qq_nickname
-from plugins.commspt_bot.utils.retry import call_with_retry
-
-_MAIN_SERVICE = "LittleSkin 管理端 API"
-"""主站管理端 API 在重试日志中的服务名。"""
-
-_MONGO_SERVICE = "MongoDB 映射数据库"
-"""映射数据库在重试日志中的服务名。"""
 
 _SETUID = display_command("setuid")
 """补写映射用的管理端命令展示文本（前缀跟随 COMMAND_START）。"""
@@ -71,6 +68,7 @@ _SETUID = display_command("setuid")
 
 def _group_rule(group_id: int):
     """构建仅匹配指定群号事件的 Rule 规则工厂。"""
+
     async def _checker(event) -> bool:
         return getattr(event, "group_id", None) == group_id
 
@@ -126,16 +124,6 @@ def _service_failure_text() -> str:
     return f"⚠️ 主站查询失败（已重试 {S_.failed_retry_time} 次），需手动处理"
 
 
-def _mapping_read_failure_text() -> str:
-    """映射数据库读取失败提示。"""
-    return "⚠️ 映射数据库不可用，需手动核对 UID"
-
-
-def _mapping_write_failure_text() -> str:
-    """映射写入失败提示（审批结果仍有效，只需补写台账）。"""
-    return f"⚠️ 映射写入失败，请用 {_SETUID} 补写"
-
-
 def _render_failure_text() -> str:
     """用户卡片渲染失败提示（明确不影响审批）。"""
     return "⚠️ 用户卡片渲染失败（不影响审批）"
@@ -146,18 +134,34 @@ def _cloudconfig_failure_text() -> str:
     return f"⚠️ 云控不可用（已重试 {S_.failed_retry_time} 次），本次按人工审核处理"
 
 
+def _mapping_write_failure_text() -> str:
+    """映射写入失败提示（审批结果仍有效，只需补写台账）。"""
+    return f"⚠️ 映射写入失败，请用 {_SETUID} 补写"
+
+
 async def _approve_request(
     bot: Bot,
     notice: JoinRequestNotice,
     *,
     source: str,
+    qmail_verified: bool = False,
 ) -> JoinActionResult:
-    """统一执行自动同意，异常分类与日志与手动审批保持一致。"""
-    result = await execute_join_action(bot, notice, approve=True, source=source)
+    """统一执行自动同意，异常分类与日志与手动审批保持一致。
+
+    ``qmail_verified`` 透传给审批执行核心，仅用于映射台账里的状态位。
+    """
+    result = await execute_join_action(
+        bot,
+        notice,
+        approve=True,
+        source=source,
+        qmail_verified=qmail_verified,
+    )
     if result.outcome == SUCCESS:
         logger.success(
             f"join request auto accepted [{source}]: kind={notice.kind} "
-            f"applicant={notice.applicant} answer={notice.answer}",
+            f"applicant={notice.applicant} answer={notice.answer} "
+            f"uid={result.uid} mapping_written={result.mapping_written}",
         )
     elif result.outcome == ALREADY_HANDLED:
         logger.warning(
@@ -165,22 +169,6 @@ async def _approve_request(
             f"applicant={notice.applicant} flag={notice.flag}",
         )
     return result
-
-
-async def _write_mapping(uid: int, qq: int, *, qmail_verified: bool = False) -> bool:
-    """best-effort 写入 QQ↔UID 映射；失败只记日志并返回 False。
-
-    映射数据库不是 HTTP 调用，重试仍由 ``call_with_retry`` 负责。
-    """
-    try:
-        await call_with_retry(
-            _MONGO_SERVICE,
-            UIDMapping(uid=uid, qq=qq, qmail_verified=qmail_verified).update,
-        )
-    except Exception as e:
-        logger.exception(e)
-        return False
-    return True
 
 
 async def _render_card(bot: Bot, ltsk_user: LittleSkinUser, qq: int) -> bytes | None:
@@ -376,6 +364,9 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
                 req.flag,
                 kind="Main",
                 headline="👆 已同意 [云控策略：enable_auto_accept_join_request_main]",
+                # 云控直通只是自报 UID、未做 QMail 校验，台账状态位为 False；
+                # 写入失败时补一条纯文本提示（审批已完成，只需补写）
+                extra=None if result.mapping_written is not False else [_mapping_write_failure_text()],
                 invited_id=invited_id,
             )
             return
@@ -414,8 +405,9 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
         return
 
     if email_uid and email_uid.uid == uid:
-        # 身份校验通过：先放人，再把映射写入当作台账 best-effort 处理
-        result = await _approve_request(bot, notice, source="auto:qmail")
+        # 身份校验通过：写入与登记由 execute_join_action 在放人之前完成（见其文档），
+        # 因此这里只会拿到「已放人 + 台账写入结果」，无需再自行写库。
+        result = await _approve_request(bot, notice, source="auto:qmail", qmail_verified=True)
         if result.outcome == ALREADY_HANDLED:
             return
         if result.outcome != SUCCESS:
@@ -431,7 +423,7 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
                 invited_id=invited_id,
             )
             return
-        if not await _write_mapping(uid, applicant, qmail_verified=True):
+        if result.mapping_written is False:
             await _auto_accept_notice(
                 S_.defined_qq.commspt_group,
                 applicant,
@@ -480,18 +472,15 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
         )
         return
 
-    # ---- 需人工处理：映射写入与出图并发，两者都是 best-effort ----
+    # ---- 需人工处理：映射不再在申请阶段落库 ----
+    # 台账写入统一放在审批执行核心里（先写库再放人），申请阶段写库既解决不了
+    # 欢迎通知的竞态，还会给一个尚未批准的申请留下错误映射。
     hints: list[str] = []
     if email_uid:
         hints.append(f"ⓘ 可能才为正确对应的 UID: {email_uid.uid}")
     hints.append("👀 请手动处理")
 
-    mapping_ok, image = await asyncio.gather(
-        _write_mapping(uid, applicant),
-        _render_card(bot, ltsk_user, applicant),
-    )
-    if not mapping_ok:
-        hints.append(_mapping_write_failure_text())
+    image = await _render_card(bot, ltsk_user, applicant)
     if image is None:
         hints.append(_render_failure_text())
     else:
@@ -699,19 +688,11 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
         )
         return
 
-    # 审批已完成，映射查询只用于结果播报，失败不影响放人
-    message: list[str] = []
-    try:
-        mapping_uid = await call_with_retry(_MONGO_SERVICE, UIDMapping.fetch, qq=applicant)
-        status = "✅" if (mapping_uid and mapping_uid.uid == uid) else "⚠️"  # 检查是否与主群记录的 UID 映射一致
-    except Exception as e:
-        # 映射数据库不可用不影响审批，仅标记为未知并提示手动核对
-        logger.exception(e)
-        status = "⚠️"
-        message.append(_mapping_read_failure_text())
-
-    message.append(f"(RESULT) Mapping {status}: QQ {applicant} -> UID {uid}")
-    await _send_to_group(S_.defined_qq.littleskin_cafe, "\n\n".join(m for m in message if m))
+    # 审批已完成，UID 取自申请答案（审批时已登记），不回查映射库
+    await _send_to_group(
+        S_.defined_qq.littleskin_cafe,
+        f"(RESULT) QQ {applicant} -> UID {uid}（来自申请答案，未核对主群映射）",
+    )
 
 
 # endregion
@@ -731,18 +712,15 @@ async def member_join_welcome_handler(bot: Bot, event: GroupIncreaseNoticeEvent)
     welcome_msg = Message() + MessageSegment.at(event.user_id) + " "
     nofi_msg = [f"用户已入群 > {event.user_id}"]
 
-    # 三个外部点各自降级：任一失败只少对应字段，欢迎语与通知始终发送
-    uid_mapping: UIDMapping | None = None
-    try:
-        uid_mapping = await call_with_retry(_MONGO_SERVICE, UIDMapping.fetch, qq=event.user_id)
-    except Exception as e:
-        logger.exception(e)
-        nofi_msg.append(_mapping_read_failure_text())
+    # UID 只从审批时登记的进程内表读取：不查映射库、不做任何兜底外部查询。
+    # 放人会立刻触发本事件，若这里回查 MongoDB 就会与审批前置写入抢时序
+    # （过去稳定读到空，表现为通知群永远显示「未找到 UIDMapping 信息」）。
+    join_uid = get_join_uid(event.user_id)
 
     # add UID info
-    if uid_mapping:
-        welcome_msg = welcome_msg + f"UID: {uid_mapping.uid}  "
-        nofi_msg.append(f"UID: {uid_mapping.uid}")
+    if join_uid:
+        welcome_msg = welcome_msg + f"UID: {join_uid.uid}  "
+        nofi_msg.append(f"UID: {join_uid.uid}（来自入群申请答案）")
 
     # add join announcement
 
@@ -763,52 +741,60 @@ async def member_join_welcome_handler(bot: Bot, event: GroupIncreaseNoticeEvent)
     # send to main group
     await member_join_welcome.send(welcome_msg)
 
+    if not join_uid:
+        # 无登记（管理员直拉入群 / 免审邀请 / Bot 重启过）或申请未填有效 UID：
+        # 只发已 @ 的欢迎语，不再产生任何外部调用，也不向通知群播报半截信息。
+        logger.info(
+            "member joined without pending uid: user_id={user_id}（仅发送欢迎语，不查映射）",
+            user_id=event.user_id,
+        )
+        return
+
     # render image
     image: bytes | None = None  # pre define
 
-    if uid_mapping:
-        ltsk_user: LittleSkinUser | None = None
-        try:
-            ltsk_user = await LittleSkinUser.uid_info(uid_mapping.uid)
-        except Exception as e:
-            logger.exception(e)
-            nofi_msg.append(_service_failure_text())
+    ltsk_user: LittleSkinUser | None = None
+    try:
+        ltsk_user = await LittleSkinUser.uid_info(join_uid.uid)
+    except Exception as e:
+        logger.exception(e)
+        nofi_msg.append(_service_failure_text())
 
-        if ltsk_user is None:
-            if not any(text.startswith("⚠️") for text in nofi_msg):
-                # UID not exists
-                nofi_msg.append("❌ 这个 UID 根本不存在")
-        else:
-            # if qmail verified (only noti)
-            if uid_mapping.qmail_verified:
-                nofi_msg.append("QMAIL ✅ 验证通过")
-            else:
-                nofi_msg.append(
-                    f"QMAIL {'❔ 与 QQ 号不匹配' if ltsk_user.email.lower().endswith('@qq.com') else '❌ 非 QQ 邮箱'}",
-                )
-
-            # check whether email contains uppercase letters (only noti)
-            if ltsk_user.email.lower() != ltsk_user.email:
-                nofi_msg.append("⚠️ 邮箱含有大写字母")
-
-            # add LTSK email verification status (only noti)
-            nofi_msg.append(f"邮箱验证 {'✅ 已验证' if ltsk_user.verified else '❌ 未验证'} ({ltsk_user.email})")
-
-            # add registration time (only noti)
-            reg_time = arrow.get(ltsk_user.register_at, tzinfo="Asia/Shanghai").format("YYYY-MM-DD HH:mm:ss")
-            nofi_msg.append(f"注册时间: {reg_time}")
-
-            # resay: if user was banned
-            if ltsk_user.permission == -1:
-                nofi_msg.append("❌ 账号被封禁")
-
-            # render image
-            image = await _render_card(bot, ltsk_user, event.user_id)
-            if image is None:
-                nofi_msg.append(_render_failure_text())
-    else:
+    if ltsk_user is None:
         if not any(text.startswith("⚠️") for text in nofi_msg):
-            nofi_msg.append("🈚 未找到 UIDMapping 信息")
+            # UID not exists
+            nofi_msg.append("❌ 这个 UID 根本不存在")
+    else:
+        # QMail 状态以「主站邮箱是否为该 QQ 的 QQ 邮箱」为准：
+        # 不再依赖映射库里的 qmail_verified 位（该位只反映审批当时是否校验过）
+        if join_uid.qmail_verified:
+            nofi_msg.append("QMAIL ✅ 验证通过")
+        elif ltsk_user.email.lower() == f"{event.user_id}@qq.com":
+            nofi_msg.append("QMAIL ❔ 邮箱匹配但本次未校验")
+        elif ltsk_user.email.lower().endswith("@qq.com"):
+            nofi_msg.append("QMAIL ❔ 与 QQ 号不匹配")
+        else:
+            nofi_msg.append("QMAIL ❌ 非 QQ 邮箱")
+
+        # check whether email contains uppercase letters (only noti)
+        if ltsk_user.email.lower() != ltsk_user.email:
+            nofi_msg.append("⚠️ 邮箱含有大写字母")
+
+        # add LTSK email verification status (only noti)
+        nofi_msg.append(f"邮箱验证 {'✅ 已验证' if ltsk_user.verified else '❌ 未验证'} ({ltsk_user.email})")
+
+        # add registration time (only noti)
+        reg_time = arrow.get(ltsk_user.register_at, tzinfo="Asia/Shanghai").format("YYYY-MM-DD HH:mm:ss")
+        nofi_msg.append(f"注册时间: {reg_time}")
+
+        # resay: if user was banned
+        if ltsk_user.permission == -1:
+            nofi_msg.append("❌ 账号被封禁")
+
+        # render image
+        image = await _render_card(bot, ltsk_user, event.user_id)
+        if image is None:
+            nofi_msg.append(_render_failure_text())
 
     # send noti to notification channel
     noti = UniMessage()

@@ -60,8 +60,8 @@ async def request_skinrendermc(skin_url: str | None, cape_url: str | None, name_
 
 def process_image(image_bytes: bytes, text: str) -> bytes:
     """对皮肤渲染图进行后处理：裁剪底部阴影/多余边距并在右下角添加水印"""
-    # Open the image from the byte representation
-    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    # 保留渲染后端返回的透明/半透明像素；转成 RGB 会丢失 alpha，使透明背景变黑。
+    image = Image.open(BytesIO(image_bytes)).convert("RGBA")
     # 裁剪底部约 13% 区域以去除渲染图底部的多余空白和阴影
     image = image.crop((0, 0, image.width, int(image.height * 0.87)))
 

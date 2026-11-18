@@ -51,6 +51,7 @@ from plugins.commspt_bot.utils.join_action import (
     execute_join_action,
     remember_approval,
 )
+from plugins.commspt_bot.utils.join_answer_hint import non_numeric_answer_hint
 from plugins.commspt_bot.utils.join_ledger import get_join_uid
 from plugins.commspt_bot.utils.join_request_notice import (
     JoinRequestNotice,
@@ -315,7 +316,8 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             answer,
             req.sub_type,
             req.flag,
-            ["👀 答案不是纯数字，需手动处理"],
+            # 只有主群批准会写映射台账，非数字答案批准后不会落账，因此附上补绑提示
+            [non_numeric_answer_hint(answer, applicant, setuid_command=_SETUID)],
             invited_id=invited_id,
         )
         return
@@ -547,7 +549,8 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
             answer,
             req.sub_type,
             req.flag,
-            ["👀 答案不是纯数字，需手动处理"],
+            # 茶馆批准只在内存登记、不写映射台账，无需补绑提示
+            [non_numeric_answer_hint(answer, applicant)],
             invited_id=invited_id,
         )
         return

@@ -40,6 +40,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.cloudconfig import CloudConfig
 from plugins.commspt_bot.models.littleskin_api import LittleSkinUser
+from plugins.commspt_bot.models.render_join_hint import RenderJoinAnswerHint
 from plugins.commspt_bot.models.render_user_info import RenderUserInfo
 from plugins.commspt_bot.utils.ban_lookup import banned_records_block
 from plugins.commspt_bot.utils.command_prefix import display_command
@@ -51,7 +52,7 @@ from plugins.commspt_bot.utils.join_action import (
     execute_join_action,
     remember_approval,
 )
-from plugins.commspt_bot.utils.join_answer_hint import non_numeric_answer_hint
+from plugins.commspt_bot.utils.join_answer_hint import analyze_answer, non_numeric_answer_hint
 from plugins.commspt_bot.utils.join_ledger import get_join_uid
 from plugins.commspt_bot.utils.join_request_notice import (
     JoinRequestNotice,
@@ -184,6 +185,42 @@ async def _render_card(bot: Bot, ltsk_user: LittleSkinUser, qq: int) -> bytes | 
         return None
 
 
+def _hint_card_failure_text() -> str:
+    """提示卡渲染失败提示（明确不影响审批，文字提示已完整回落）。"""
+    return "⚠️ 提示卡片渲染失败（不影响审批）"
+
+
+async def _non_numeric_hint(
+    bot: Bot,
+    kind: NoticeKind,
+    applicant: int,
+    answer: str,
+    sub_type: NoticeSubtype,
+    *,
+    setuid_command: str | None = None,
+) -> tuple[list[str], bytes | None]:
+    """「答案不是纯数字」分支的提示：best-effort 出提示卡，失败回落完整文字提示。
+
+    出图成功时文字只留一句结论（细节都在卡片上，不重复刷屏）；
+    失败时发送完整文字提示块并注明卡片渲染失败，审批流程不受影响。
+    """
+    analysis = analyze_answer(answer, applicant)
+    try:
+        card = RenderJoinAnswerHint.from_analysis(
+            analysis,
+            kind=kind,
+            sub_type=sub_type,
+            applicant=applicant,
+            qq_nickname=await get_qq_nickname(bot, applicant),
+            setuid_command=setuid_command,
+        )
+        return [analysis.headline], await card.get_image()
+    except Exception as e:
+        logger.exception(e)
+        text = non_numeric_answer_hint(answer, applicant, setuid_command=setuid_command)
+        return [text, _hint_card_failure_text()], None
+
+
 async def _send_approval_notice(
     bot: Bot,
     group_id: int,
@@ -308,6 +345,8 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
         logger.warning(
             f"(main) Member Join Request Event {req.sub_type} was ignored. (ANSWER NOT DECIMAL) {applicant} > {answer}",
         )
+        # 只有主群批准会写映射台账，非数字答案批准后不会落账，因此附上补绑提示
+        hints, image = await _non_numeric_hint(bot, "Main", applicant, answer, req.sub_type, setuid_command=_SETUID)
         await _send_approval_notice(
             bot,
             S_.defined_qq.commspt_group,
@@ -316,8 +355,8 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             answer,
             req.sub_type,
             req.flag,
-            # 只有主群批准会写映射台账，非数字答案批准后不会落账，因此附上补绑提示
-            [non_numeric_answer_hint(answer, applicant, setuid_command=_SETUID)],
+            hints,
+            image,
             invited_id=invited_id,
         )
         return
@@ -540,7 +579,10 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
         logger.warning(
             f"(cafe) Member Join Request Event {req.sub_type} was ignored. (ANSWER NOT DECIMAL) {applicant} > {answer}",
         )
-        # 即便无法自动处理，也需向群聊发送申请通知，方便管理员交互处理
+        # 即便无法自动处理，也需向群聊发送申请通知，方便管理员交互处理。
+        # 茶馆批准只在内存登记、不写映射台账，无需补绑提示；提示卡只含申请事件本身的
+        # 信息（QQ 号、昵称、答案），不涉及 LittleSkin 账号资料，与「茶馆不发用户卡」不冲突。
+        hints, image = await _non_numeric_hint(bot, "Cafe", applicant, answer, req.sub_type)
         await _send_approval_notice(
             bot,
             S_.defined_qq.littleskin_cafe,
@@ -549,8 +591,8 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
             answer,
             req.sub_type,
             req.flag,
-            # 茶馆批准只在内存登记、不写映射台账，无需补绑提示
-            [non_numeric_answer_hint(answer, applicant)],
+            hints,
+            image,
             invited_id=invited_id,
         )
         return

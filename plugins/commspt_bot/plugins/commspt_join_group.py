@@ -195,7 +195,7 @@ async def _render_non_numeric_card(
     answer: str,
     sub_type: NoticeSubtype,
 ) -> bytes | None:
-    """best-effort 渲染「待人工审核」提示卡；失败返回 None（不影响审批）。
+    """best-effort 渲染「答案不是纯数字」提示卡；失败返回 None（不影响审批）。
 
     卡片只把申请事件本身的信息（申请人 QQ、昵称、答案原文）摆清楚，不做识别或猜测。
     渲染失败时通知仍是完整的文字版（答案原文本就在通知块里），只记日志，不额外提示。

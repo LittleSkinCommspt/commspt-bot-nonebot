@@ -21,8 +21,8 @@
     <style>
         /* ---- 设计口径 ------------------------------------------------------------
            用户卡片是「档案」：昵称打头、绿色中性调、满圈描边。
-           这张是「待审单」：主角是申请人写下的原话，按原样放大展示，机器人认出的片段
-           用注音（ruby）直接标在原文上方——管理员不用对照两处文字，读一遍原话就够。
+           这张是「待审单」：主角是申请人写下的原话，按原样放大展示，不做任何识别或猜测
+           ——答案不是 UID 的申请默认由管理员按情况处理，卡片只负责把事实摆清楚。
            琥珀色只表达「待处理」：左侧粗色条 + 结论条，其余保持安静。 */
         :root {
             color-scheme: light;
@@ -36,12 +36,7 @@
             --pending: #874600;
             --pending-bg: #fff0d4;
             --pending-rule: #c57a12;
-            --uid-ink: #6a3700;
-            --uid-mark: #ffd98a;
-            --qq-ink: #a1322a;
-            --qq-mark: #fde4e0;
-            --mail-ink: #21548a;
-            --mail-mark: #e1edfa;
+            --reject: #a1322a;
         }
         :root[data-theme="dark"] {
             color-scheme: dark;
@@ -54,12 +49,7 @@
             --pending: #f9cf8b;
             --pending-bg: #48351a;
             --pending-rule: #e0a145;
-            --uid-ink: #ffe4b0;
-            --uid-mark: #6c4911;
-            --qq-ink: #ffbab1;
-            --qq-mark: #4d2b2b;
-            --mail-ink: #acd0f6;
-            --mail-mark: #213851;
+            --reject: #ffb4aa;
         }
         * { box-sizing: border-box; }
         body {
@@ -119,20 +109,16 @@
             white-space: nowrap;
         }
 
-        /* ---- 主角：申请人的原话 -------------------------------------------------
-           标注不用原生 <ruby>：Chromium 会把注音字距拉开铺满底字（「申　请　人」），
-           底字换行时注音也会跟着被拆成两截。这里用 inline-block 自己排：注音一行、
-           原文片段一行，整块不拆行；inline-block 的基线取最后一行，即原文片段的基线，
-           所以标注块与前后文字自然对齐，只有带标注的那一行会变高。 */
-        .answer { padding: 12px 18px 10px; }
+        /* 主角：申请人的原话，原样展示（保留全角字符与空格写法） */
+        .answer { padding: 14px 18px 14px; }
         .answer-text {
             font-size: 30px;
-            line-height: 1.5;
+            line-height: 1.4;
+            white-space: pre-wrap;
             overflow-wrap: anywhere;
             word-break: break-word;
         }
         .answer-text.is-empty {
-            margin: 8px 0 6px;
             padding: 14px 16px;
             border: 2px dashed var(--line);
             border-radius: 10px;
@@ -140,40 +126,6 @@
             line-height: 1.3;
             color: var(--muted);
         }
-        .anno {
-            display: inline-block;
-            max-width: 100%;
-            margin: 0 .08em;
-            white-space: nowrap;
-            vertical-align: baseline;
-        }
-        .note {
-            display: block;
-            padding: 0 0 2px 2px;
-            font-size: 12px;
-            line-height: 1.2;
-        }
-        .mark {
-            display: block;
-            padding: 0 .14em;
-            border-radius: 5px;
-            line-height: 1.25;
-        }
-        /* 邮箱可能很长：允许在片段内折行，别把卡片撑破 */
-        .a-email { white-space: normal; }
-        .a-email .mark { overflow-wrap: anywhere; }
-        .a-uid .mark { background: var(--uid-mark); color: var(--uid-ink); }
-        .a-uid .note { color: var(--uid-ink); }
-        /* 申请人自己的 QQ 号：划掉，明确「这不是 UID」 */
-        .a-qq .mark {
-            background: var(--qq-mark);
-            color: var(--qq-ink);
-            text-decoration: line-through;
-            text-decoration-thickness: 2px;
-        }
-        .a-qq .note { color: var(--qq-ink); }
-        .a-email .mark { background: var(--mail-mark); color: var(--mail-ink); }
-        .a-email .note { color: var(--mail-ink); }
 
         .verdict {
             display: flex;
@@ -200,13 +152,34 @@
         dd { margin-top: 3px; font-size: 20px; line-height: 1.3; overflow-wrap: anywhere; }
         dd.quiet { color: var(--muted); }
 
-        /* 底部虚线：把「怎么处理」与「申请内容」分开，像撕开的审批单存根 */
+        /* 底部虚线：把「怎么处理」与申请内容分开，像审批单存根。
+           拒绝排在前面：答案不是 UID 的申请默认不通过，但拒绝同样要管理员手动操作。 */
         .stub {
             margin-top: 14px;
-            padding: 10px 18px 14px;
+            padding: 12px 18px 12px;
             border-top: 2px dashed var(--line);
         }
-        .tip { font-size: 15px; line-height: 1.45; }
+        .actions { margin: 0; padding: 0; list-style: none; }
+        .actions li {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            font-size: 15px;
+            line-height: 1.45;
+        }
+        .actions li + li { margin-top: 6px; }
+        /* 图标盒高度等于一行文字（1.45em），多行时与首行对齐 */
+        .act-icon {
+            flex: none;
+            width: 1.15em;
+            height: 1.45em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted);
+        }
+        .act-icon svg { width: 100%; height: auto; }
+        .is-reject .act-icon { color: var(--reject); }
         .cmd {
             padding: 1px 7px;
             border-radius: 5px;
@@ -214,12 +187,12 @@
             font-family: inherit;
             white-space: nowrap;
         }
-        .generated { margin-top: 4px; font-size: 13px; color: var(--muted); }
-        .tip + .generated { margin-top: 6px; }
+        /* 补充说明单独成行，避免括号说明在行尾被拆成两截 */
+        .aside { display: block; font-size: 13px; line-height: 1.35; color: var(--muted); }
+        .generated { margin-top: 10px; font-size: 13px; color: var(--muted); }
     </style>
 </head>
 <body{% if transparent %} class="no-chrome"{% endif %}>
-    {% set role_note = {'uid': '可能是 UID', 'qq': '申请人 QQ', 'email': '邮箱'} %}
     <article class="slip" aria-label="入群申请待人工审核">
         <header class="head">
             <h1 class="status">待人工审核</h1>
@@ -229,28 +202,35 @@
             </div>
         </header>
         <section class="answer" aria-label="申请答案">
-            {% if segments %}
-            <p class="answer-text">
-                {%- for text, role in segments -%}
-                {%- if role == 'plain' -%}{{ text }}
-                {%- else -%}<span class="anno a-{{ role }}"><span class="note">{{ role_note[role] }}</span><span class="mark">{{ text }}</span></span>
-                {%- endif -%}
-                {%- endfor -%}
-            </p>
+            {% if answer | trim %}
+            <p class="answer-text">{{ answer | trim }}</p>
             {% else %}
-            {# 原话位置只表达「这里是空的」，原因交给下方结论条，避免同一句话说两遍 #}
+            {# 原话位置只表达「这里是空的」，原因交给下方结论条 #}
             <p class="answer-text is-empty">（空）</p>
             {% endif %}
         </section>
-        <p class="verdict"><svg viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M256 32c14.2 0 27.3 7.5 34.5 19.8l216 368c7.3 12.4 7.3 27.7 .2 40.1S486.3 480 472 480L40 480c-14.3 0-27.6-7.7-34.7-20.1s-7-27.8 .2-40.1l216-368C228.7 39.5 241.8 32 256 32zm0 128c-13.3 0-24 10.7-24 24l0 112c0 13.3 10.7 24 24 24s24-10.7 24-24l0-112c0-13.3-10.7-24-24-24zm32 224a32 32 0 1 0 -64 0 32 32 0 1 0 64 0z"/></svg>{{ reason }}</p>
+        <p class="verdict"><svg viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M256 32c14.2 0 27.3 7.5 34.5 19.8l216 368c7.3 12.4 7.3 27.7 .2 40.1S486.3 480 472 480L40 480c-14.3 0-27.6-7.7-34.7-20.1s-7-27.8 .2-40.1l216-368C228.7 39.5 241.8 32 256 32zm0 128c-13.3 0-24 10.7-24 24l0 112c0 13.3 10.7 24 24 24s24-10.7 24-24l0-112c0-13.3-10.7-24-24-24zm32 224a32 32 0 1 0 -64 0 32 32 0 1 0 64 0z"/></svg>答案不是纯数字</p>
         <dl class="applicant">
             <div><dt>申请人 QQ</dt><dd>{{ applicant }}</dd></div>
             <div><dt>QQ 昵称</dt><dd{% if not qq_nickname %} class="quiet"{% endif %}>{{ qq_nickname or '未获取' }}</dd></div>
         </dl>
-        <footer class="stub">
-            {% if setuid_command and has_uid %}
-            <p class="tip">批准后不会自动绑定 UID，核实后可用 <code class="cmd">{{ setuid_command }}</code> 补绑</p>
-            {% endif %}
+        {# 内嵌 FontAwesome 矢量图标（与用户卡片一致，不依赖渲染机的 emoji 字体） #}
+        {% set thumb = 'M313.4 32.9c26 5.2 42.9 30.5 37.7 56.5l-2.3 11.4c-5.3 26.7-15.1 52.1-28.8 75.2H464c26.5 0 48 21.5 48 48c0 18.5-10.5 34.6-25.9 42.6C497 275.4 504 288.9 504 304c0 23.4-16.8 42.9-38.9 47.1c4.4 7.3 6.9 15.8 6.9 24.9c0 21.3-13.9 39.4-33.1 45.6c.7 3.3 1.1 6.8 1.1 10.4c0 26.5-21.5 48-48 48H294.5c-19 0-37.5-5.6-53.3-16.1l-38.5-25.7C176 420.4 160 390.4 160 358.3V320 272 247.1c0-29.2 13.3-56.7 36-75l7.4-5.9c26.5-21.2 44.6-51 51.2-84.2l2.3-11.4c5.2-26 30.5-42.9 56.5-37.7zM32 192H96c17.7 0 32 14.3 32 32V448c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32V224c0-17.7 14.3-32 32-32z' %}
+        <footer class="stub" aria-label="处理方式">
+            <ul class="actions">
+                <li class="is-reject">
+                    <span class="act-icon"><svg viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" transform="matrix(1 0 0 -1 0 512)" d="{{ thumb }}"/></svg></span>
+                    <span>拒绝，理由为「{{ reject_reason }}」</span>
+                </li>
+                <li class="is-reject">
+                    <span class="act-icon"><svg viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M205 34.8c11.5 5.1 19 16.6 19 29.2v64H336c97.2 0 176 78.8 176 176c0 113.3-81.5 163.9-100.2 174.1c-2.5 1.4-5.3 1.9-8.1 1.9c-10.9 0-19.7-8.9-19.7-19.7c0-7.5 4.3-14.4 9.8-19.5c9.4-8.8 22.2-26.4 22.2-56.7c0-53-43-96-96-96H224v64c0 12.6-7.4 24.1-19 29.2s-25 3-34.4-5.4l-160-144C3.9 225.7 0 217.1 0 208s3.9-17.7 10.6-23.8l160-144c9.4-8.5 22.9-10.6 34.4-5.4z"/></svg></span>
+                    <span>引用本消息回复 <code class="cmd">do reject 理由</code> 自定义拒绝理由<span class="aside">理由中不能有空格</span></span>
+                </li>
+                <li>
+                    <span class="act-icon"><svg viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="{{ thumb }}"/></svg></span>
+                    <span>通过，也可回复 <code class="cmd">do accept</code></span>
+                </li>
+            </ul>
             <p class="generated">生成于 {{ generated_at }}</p>
         </footer>
     </article>

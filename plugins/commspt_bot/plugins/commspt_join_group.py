@@ -40,6 +40,7 @@ from nonebot_plugin_alconna.uniseg import UniMessage
 from plugins.commspt_bot.config import S_
 from plugins.commspt_bot.models.cloudconfig import CloudConfig
 from plugins.commspt_bot.models.littleskin_api import LittleSkinUser
+from plugins.commspt_bot.models.render_join_hint import RenderJoinAnswerHint
 from plugins.commspt_bot.models.render_user_info import RenderUserInfo
 from plugins.commspt_bot.utils.ban_lookup import banned_records_block
 from plugins.commspt_bot.utils.command_prefix import display_command
@@ -183,6 +184,36 @@ async def _render_card(bot: Bot, ltsk_user: LittleSkinUser, qq: int) -> bytes | 
         return None
 
 
+_NON_NUMERIC_HINT = "👀 答案不是纯数字，需手动处理"
+"""答案不是纯数字时的提示行（有无提示卡都发这一句）。"""
+
+
+async def _render_non_numeric_card(
+    bot: Bot,
+    kind: NoticeKind,
+    applicant: int,
+    answer: str,
+    sub_type: NoticeSubtype,
+) -> bytes | None:
+    """best-effort 渲染「答案不是纯数字」提示卡；失败返回 None（不影响审批）。
+
+    卡片只把申请事件本身的信息（申请人 QQ、昵称、答案原文）摆清楚，不做识别或猜测。
+    渲染失败时通知仍是完整的文字版（答案原文本就在通知块里），只记日志，不额外提示。
+    """
+    try:
+        card = RenderJoinAnswerHint(
+            kind=kind,
+            sub_type=sub_type,
+            applicant=applicant,
+            qq_nickname=await get_qq_nickname(bot, applicant),
+            answer=answer,
+        )
+        return await card.get_image()
+    except Exception as e:
+        logger.exception(e)
+        return None
+
+
 async def _send_approval_notice(
     bot: Bot,
     group_id: int,
@@ -315,7 +346,8 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             answer,
             req.sub_type,
             req.flag,
-            ["👀 答案不是纯数字，需手动处理"],
+            [_NON_NUMERIC_HINT],
+            await _render_non_numeric_card(bot, "Main", applicant, answer, req.sub_type),
             invited_id=invited_id,
         )
         return
@@ -538,7 +570,9 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
         logger.warning(
             f"(cafe) Member Join Request Event {req.sub_type} was ignored. (ANSWER NOT DECIMAL) {applicant} > {answer}",
         )
-        # 即便无法自动处理，也需向群聊发送申请通知，方便管理员交互处理
+        # 即便无法自动处理，也需向群聊发送申请通知，方便管理员交互处理。
+        # 提示卡只含申请事件本身的信息（QQ 号、昵称、答案），不涉及 LittleSkin 账号资料，
+        # 与「茶馆不发用户卡」不冲突。
         await _send_approval_notice(
             bot,
             S_.defined_qq.littleskin_cafe,
@@ -547,7 +581,8 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
             answer,
             req.sub_type,
             req.flag,
-            ["👀 答案不是纯数字，需手动处理"],
+            [_NON_NUMERIC_HINT],
+            await _render_non_numeric_card(bot, "Cafe", applicant, answer, req.sub_type),
             invited_id=invited_id,
         )
         return

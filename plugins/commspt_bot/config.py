@@ -209,6 +209,10 @@ class Setting(BaseModel):
     # 默认 accept，保持原有 UID 存在即自动同意的行为。
     cafe_banned_user_action: Literal["accept", "reject", "manual"] = "accept"
 
+    # 是否允许引用入群申请通知直接回复「拒绝 理由」来拒绝（do reject 的中文快捷写法）。
+    # 环境变量 JOIN_REPLY_REJECT_ENABLED；默认关闭，do accept / do reject 不受影响。
+    join_reply_reject_enabled: bool = False
+
     # 用户信息卡按北京时间自动切换主题；关闭后跟随被查询账户的 is_dark_mode。
     user_card_auto_theme: bool = True
 

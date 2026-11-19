@@ -100,7 +100,7 @@ cp config.yml.example config.yml
 | `admin_list`（`config.yml`） | 管理员 QQ 列表（YAML 数组） |
 | `request_logging`（`config.yml`） | 请求日志开关与目录：`enabled`（默认 `true`）、`directory`（默认 `./logs/commspt-bot/`），见[请求日志](#request-logging) |
 | `CAFE_BANNED_USER_ACTION` | 咖啡馆封禁账号的审核策略：`accept`（默认，保持原有自动同意）、`reject`（自动拒绝）、`manual`（人工审核）；修改后重启生效，不影响主群 |
-| `JOIN_REPLY_REJECT_ENABLED` | 是否允许引用入群申请通知直接回复「拒绝 理由」来拒绝；默认 `false`（关闭），`do` 命令不受影响；修改后重启生效 |
+| `JOIN_REPLY_REJECT_ENABLED` | 是否允许引用入群申请通知直接回复「拒绝 理由」来拒绝；默认 `true`（开启），设为 `false` 可关闭，`do` 命令不受影响；修改后重启生效 |
 | `JOIN_HINT_CARD_ENABLED` | 答案不是纯数字（转人工）时，是否在通知里附带「转人工」提示卡图片；默认 `false`（关闭，即纯文字通知）；修改后重启生效 |
 | `JOIN_HINT_CARD_COMPACT_TEXT` | 附带提示卡时，文字部分是否只保留一行 id（申请人、问题、答案只在图片里）；默认 `false`；仅在 `JOIN_HINT_CARD_ENABLED=true` 时生效；修改后重启生效 |
 | `LITTLESKIN_ADMIN_TOKEN` | LittleSkin Admin API Token |
@@ -389,7 +389,7 @@ id=add_slreq:1:1795023805524218:586146922:2:0
 
 1. **文字命令**：回复该通知消息，发送 `do accept` 或 `do reject [原因]`（裸命令，不受全局前缀影响）。
 2. **表情回应**：直接对该通知消息贴 👍（批准）或 👎（拒绝）。仅发起审批的管理员本人、且在允许的群聊内有效；Bot 自身贴表情不会触发。
-3. **快捷拒绝（默认关闭）**：在 `.env` 设置 `JOIN_REPLY_REJECT_ENABLED=true` 后，引用该通知消息直接回复 `拒绝 理由` 即可拒绝。理由取「拒绝」之后的整段文字，可以带空格；只回复 `拒绝` 时使用默认理由（`请正确填写UID`）。「拒绝」是日常用语，因此只有引用 Bot 发出的申请通知时才会生效，其它情况静默忽略、不回任何提示。开关只影响这种写法，`do accept` / `do reject [原因]` 始终可用。
+3. **快捷拒绝（默认开启）**：引用该通知消息直接回复 `拒绝 理由` 即可拒绝；如需关闭，在 `.env` 设置 `JOIN_REPLY_REJECT_ENABLED=false`。理由取「拒绝」之后的整段文字，可以带空格；只回复 `拒绝` 时使用默认理由（`请正确填写UID`）。「拒绝」是日常用语，因此只有引用 Bot 发出的申请通知时才会生效，其它情况静默忽略、不回任何提示。开关只影响这种写法，`do accept` / `do reject [原因]` 始终可用。
 
 表情审批的处理要点：
 

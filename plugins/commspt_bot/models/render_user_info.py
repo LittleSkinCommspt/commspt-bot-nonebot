@@ -18,7 +18,7 @@ from typing import Annotated
 
 import arrow
 from nonebot import logger
-from pydantic import BaseModel, EmailStr, Field, IPvAnyAddress, computed_field
+from pydantic import BaseModel, EmailStr, Field, IPvAnyAddress
 from pydantic.functional_serializers import PlainSerializer
 
 from plugins.commspt_bot.config import S_
@@ -74,16 +74,6 @@ class RenderUserInfo(BaseModel):
     ip: list[Annotated[str, IPvAnyAddress]]
 
     ban_reason: str | None = None
-
-    # 计算字段：根据邮箱验证状态与大小写规则动态生成辅助提示说明
-    @computed_field
-    def email_help(self) -> str:
-        """生成邮箱验证与格式提示文本。"""
-        v: list[str] = []
-        v.append("已验证" if self.verified else "未验证")
-        if self.email.lower() != self.email:
-            v.append("⚠️ 含有大写字母 ⚠️ ")
-        return " / ".join(v)
 
     async def get_image(self, *, now: datetime | None = None) -> bytes:
         """整合 IP 属地并调用 Browserless 服务渲染用户资料卡片截图。

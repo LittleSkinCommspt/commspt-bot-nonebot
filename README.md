@@ -31,7 +31,7 @@ plugins/commspt_bot/              # 父插件（共享层）
 │   ├── bingling_ipip.py          # IP 归属地
 │   ├── feishu_bitable.py         # 飞书多维表格客户端（&banlog 写入）
 │   ├── render_user_info.py       # 用户信息卡数据模型 + 出图
-│   └── render_join_hint.py       # 答案非纯数字时的回执单式提示卡 + 出图
+│   └── render_join_hint.py       # 答案非纯数字时的「转人工」提示卡 + 出图
 ├── utils/
 │   ├── adv_filter.py             # 群白名单 / 管理员 规则与权限
 │   ├── messenger.py              # 跨群发送工具
@@ -45,7 +45,7 @@ plugins/commspt_bot/              # 父插件（共享层）
 │   ├── ban_lookup.py             # 按 UID 查询封禁记录（&user / 入群通知复用）
 │   ├── ban_record.py             # &banlog 参数解析与表格列名映射（纯函数）
 │   └── random_sleep.py           # 随机延时（拟人化）
-├── templates/                    # 用户信息卡 / 非数字答案提示卡模板
+├── templates/                    # 用户信息卡 / 转人工提示卡模板（共用 card-base.css.jinja）
 └── plugins/                      # 14 个子插件（每个功能一个）
     ├── commspt_simple_response.py    # 单一 on_message 分发器，服务 commspt_simple_response.json 中的全部静态问答命令；管理员 &sreload 可在运行时热重载
     ├── commspt_profile.py            # &ygg / &pro 玩家查询
@@ -100,7 +100,9 @@ cp config.yml.example config.yml
 | `admin_list`（`config.yml`） | 管理员 QQ 列表（YAML 数组） |
 | `request_logging`（`config.yml`） | 请求日志开关与目录：`enabled`（默认 `true`）、`directory`（默认 `./logs/commspt-bot/`），见[请求日志](#request-logging) |
 | `CAFE_BANNED_USER_ACTION` | 咖啡馆封禁账号的审核策略：`accept`（默认，保持原有自动同意）、`reject`（自动拒绝）、`manual`（人工审核）；修改后重启生效，不影响主群 |
-| `JOIN_REPLY_REJECT_ENABLED` | 是否允许引用入群申请通知直接回复「拒绝 理由」来拒绝；默认 `false`（关闭），`do` 命令不受影响；修改后重启生效 |
+| `JOIN_REPLY_REJECT_ENABLED` | 是否允许引用入群申请通知直接回复「拒绝 理由」来拒绝；默认 `true`（开启），设为 `false` 可关闭，`do` 命令不受影响；修改后重启生效 |
+| `JOIN_HINT_CARD_ENABLED` | 答案不是纯数字（转人工）时，是否在通知里附带「转人工」提示卡图片；默认 `false`（关闭，即纯文字通知）；修改后重启生效 |
+| `JOIN_HINT_CARD_COMPACT_TEXT` | 附带提示卡时，文字部分是否只保留一行 id（申请人、问题、答案只在图片里）；默认 `false`；仅在 `JOIN_HINT_CARD_ENABLED=true` 时生效；修改后重启生效 |
 | `LITTLESKIN_ADMIN_TOKEN` | LittleSkin Admin API Token |
 | `DB_MONGO__URL` | MongoDB 连接串（QQ↔UID 映射） |
 | `DB_MONGO__CONNECT_TIMEOUT_MS` / `__SERVER_SELECTION_TIMEOUT_MS` / `__SOCKET_TIMEOUT_MS` | MongoDB 客户端超时（毫秒，默认 5000 / 10000 / 10000）。连接串中已显式声明的同名选项优先 |
@@ -121,7 +123,7 @@ cp config.yml.example config.yml
 
 卡片的主字体是 **MiSans Bold**（小米 MiSans，免费商用），由 `@font-face` 显式加载，`REMOTE` 与 `LOCAL` 都用它，不再依赖渲染机上装了什么字体——早期用系统字体栈时，Windows 命中 `Noto Sans SC`、Linux 命中 `Noto Sans CJK SC`，字重与度量都不同，同一模板在两处出图并不一致。
 
-UID / 积分 / 邮箱 / QQ / 时间戳等编号类字段同样走 MiSans Bold，并开启 `font-variant-numeric: tabular-nums`——MiSans 自带 `tnum`，数字位宽一致，逐位核对一样清楚。整卡只用一种字体后，每行图标都能和同一套字体度量对齐，也不必再为「等宽栈在 Windows 命中 Consolas、Linux 命中 Liberation Mono / DejaVu Sans Mono」这类逐平台差异留补偿常量。`email_help` 里的 `⚠️` 不在 MiSans 内，回退到宿主字体是可接受的。
+UID / 积分 / 邮箱 / QQ / 时间戳等编号类字段同样走 MiSans Bold，并开启 `font-variant-numeric: tabular-nums`——MiSans 自带 `tnum`，数字位宽一致，逐位核对一样清楚。整卡只用一种字体，也不必再为「等宽栈在 Windows 命中 Consolas、Linux 命中 Liberation Mono / DejaVu Sans Mono」这类逐平台差异留补偿常量。
 
 > **字体许可**：MiSans 由小米提供，免费商用（含嵌入），许可要求「在软件中注明使用了 MiSans 字体」。本仓库不随附字体文件，请自行从[官方页面](https://hyperos.mi.com/font/zh/)获取并遵守其许可协议。`assets/browserless/` 已加入 `.gitignore`，不会被提交。
 >
@@ -133,13 +135,13 @@ UID / 积分 / 邮箱 / QQ / 时间戳等编号类字段同样走 MiSans Bold，
 |---|---|---|
 | `MiSans-Bold.ttf` | **4.009** | 卡片主字体（名称固定） |
 
-图标已内嵌在模板里（inline SVG），渲染期不加载任何图标 JS/CSS，因此本地资源只需这一份字体。
+卡片不使用任何图标，样式全部内联在模板里（两张卡共用 `templates/card-base.css.jinja`），渲染期不加载任何外部 JS/CSS，因此本地资源只需这一份字体。
 
 入群审批 `do` 命令只接受裸命令 `do accept` 或 `do reject [单个不含空白的原因词]`。`do` 使用前缀无关的原生 `on_regex`，因此带全局前缀的 `&do`（例如 `&do accept`）不会匹配，多词拒绝原因也不会匹配。
 
 ### 用户信息卡主题
 
-`USER_CARD_AUTO_THEME` 默认开启：按 `Asia/Shanghai` 时区，07:00（含）至 19:00（不含）使用浅色，其余时间使用深色，与服务器本地时区无关。设为 `false` 后，完全恢复被查询账户的 `is_dark_mode` 偏好。该开关只影响用户信息卡，不修改账户数据，也不影响其他图卡。
+`USER_CARD_AUTO_THEME` 默认开启：按 `Asia/Shanghai` 时区，07:00（含）至 19:00（不含）使用浅色，其余时间使用深色，与服务器本地时区无关。设为 `false` 后，用户信息卡完全恢复被查询账户的 `is_dark_mode` 偏好，转人工提示卡固定使用浅色。该开关只影响这两张卡，不修改账户数据。
 
 <a id="request-logging"></a>
 
@@ -336,7 +338,25 @@ HTTP 重试由 `httpx-retries` 在传输层统一实现（`plugins/commspt_bot/u
 
 当入群申请无法自动处理（答案为非纯数字、UID 不存在、Admin API 查询失败等）时，机器人会把申请详情发到管理群（主群 → `commspt_group`，茶馆群 → `littleskin_cafe`），并为该通知消息贴上 👍 / 👎 引导表情，供管理员审批。
 
-答案不是纯数字（含留言为空）时，通知会附一张回执单式的提示卡：顶部一行是来源（主群/茶馆、主动申请/邀请入群）与申请人昵称、QQ；中间用一对红色直角引号「」框住申请人的原话并注明「答案不是纯数字」；底部是「拒绝 / 自定义理由 / 通过」三格操作栏，拒绝一格整格填红。卡片与用户信息卡刻意区分（直角墨线单据，而不是大圆角档案），只展示申请事件本身的信息，不从答案里识别或猜测 UID，也不涉及 LittleSkin 账号资料，因此茶馆通知同样附卡。这类申请默认不通过，但拒绝同样要管理员手动操作，所以卡片底部列出处理方式：贴 👎 按默认理由（`请正确填写UID`）拒绝；引用回复 `do reject 理由` 自定义拒绝理由（理由中不能有空格；开启快捷拒绝后卡片改为提示 `拒绝 理由`）；贴 👍 或回复 `do accept` 通过。出图是 best-effort：渲染失败只记日志，通知照常以文字发出，不影响审批。
+答案不是纯数字（含留言为空）时转人工：Bot 只在条件满足时有自动同意权，不满足就交给管理员判断（例如对方可能无法注册），不替管理员处理。
+
+默认发送纯文字通知；申请留言带入群问题时，在答案上方多一行 `» 问题`（只作展示，不参与解析与判定）：
+
+```
+新的入群申请 (Main)
+» 申请人 1687233060
+» 问题     你的 LittleSkin UID 是多少？
+» 答案     ulb
+
+id=add_slreq:1:1795023805524218:586146922:2:0
+
+👀 答案不是纯数字，需手动处理
+```
+
+两个可选开关（默认都关闭）：
+
+- `JOIN_HINT_CARD_ENABLED=true`：在文字前附一张「转人工」提示卡。与用户信息卡共用同一套样式（状态色顶条 + 元信息行 + 大标题，下面是紧凑的「标签 | 值」行）：标题是申请人的原话，元信息行注明「转人工 / 答案不是纯数字」与来源，下面是入群问题、申请人 QQ 与昵称（事件附带 `invited_id` 时注明「也可能是」）以及 QQ 公开资料（等级、性别、年龄、QQ 注册时间、个性签名）。QQ 资料复用查昵称的那一次 `get_stranger_info`，不额外请求；`sex` / `age` 之外的字段是协议端扩展字段，取不到就不显示。卡片只摆事实：不查主站、不从答案里识别或猜测 UID，也不放处理提示。出图是 best-effort：渲染失败只记日志，通知照常以纯文字发出。
+- `JOIN_HINT_CARD_COMPACT_TEXT=true`（需同时开启上一项）：附图时文字部分只保留一行 id，形如 `id=Main/add/1687233060/<flag>`，供 `do` 命令 / 快捷拒绝溯源，给人看的信息都在图片里；渲染失败时自动回落为完整纯文字通知。精简 id 行不携带答案，因此只用于答案不是有效 UID 的通知（审批时同样不登记 UID）。解析器始终同时认完整通知块与精简 id 行，开关打开后再关闭，已发出的通知依旧可以处理。
 
 申请人始终显示事件原始的 `user_id`；若事件携带整数类型的 `invited_id`（包括 `0`），则追加候选提示，例如 `申请人 0 (也可能是: 123456)`。该提示不要求 `user_id` 为零，也不会把 `invited_id` 当作已确认的申请人或用于 QQ/UID 映射。当原始 `user_id=0` 时，主群与茶馆群均不自动批准，而是发送上述人工审核通知；主群云控自动同意策略也不能绕过此限制。
 
@@ -369,7 +389,7 @@ HTTP 重试由 `httpx-retries` 在传输层统一实现（`plugins/commspt_bot/u
 
 1. **文字命令**：回复该通知消息，发送 `do accept` 或 `do reject [原因]`（裸命令，不受全局前缀影响）。
 2. **表情回应**：直接对该通知消息贴 👍（批准）或 👎（拒绝）。仅发起审批的管理员本人、且在允许的群聊内有效；Bot 自身贴表情不会触发。
-3. **快捷拒绝（默认关闭）**：在 `.env` 设置 `JOIN_REPLY_REJECT_ENABLED=true` 后，引用该通知消息直接回复 `拒绝 理由` 即可拒绝。理由取「拒绝」之后的整段文字，可以带空格；只回复 `拒绝` 时使用默认理由（`请正确填写UID`）。「拒绝」是日常用语，因此只有引用 Bot 发出的申请通知时才会生效，其它情况静默忽略、不回任何提示。开关只影响这种写法，`do accept` / `do reject [原因]` 始终可用。
+3. **快捷拒绝（默认开启）**：引用该通知消息直接回复 `拒绝 理由` 即可拒绝；如需关闭，在 `.env` 设置 `JOIN_REPLY_REJECT_ENABLED=false`。理由取「拒绝」之后的整段文字，可以带空格；只回复 `拒绝` 时使用默认理由（`请正确填写UID`）。「拒绝」是日常用语，因此只有引用 Bot 发出的申请通知时才会生效，其它情况静默忽略、不回任何提示。开关只影响这种写法，`do accept` / `do reject [原因]` 始终可用。
 
 表情审批的处理要点：
 

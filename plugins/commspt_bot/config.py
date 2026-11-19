@@ -210,8 +210,16 @@ class Setting(BaseModel):
     cafe_banned_user_action: Literal["accept", "reject", "manual"] = "accept"
 
     # 是否允许引用入群申请通知直接回复「拒绝 理由」来拒绝（do reject 的中文快捷写法）。
-    # 环境变量 JOIN_REPLY_REJECT_ENABLED；默认关闭，do accept / do reject 不受影响。
-    join_reply_reject_enabled: bool = False
+    # 环境变量 JOIN_REPLY_REJECT_ENABLED；默认开启，设为 false 可关闭；do accept / do reject 不受影响。
+    join_reply_reject_enabled: bool = True
+
+    # 答案不是纯数字（转人工）时，是否在通知里附带「转人工」提示卡图片。
+    # 环境变量 JOIN_HINT_CARD_ENABLED；默认关闭，即原来的纯文字通知（含入群问题与答案）。
+    join_hint_card_enabled: bool = False
+
+    # 附带提示卡时，文字部分是否只保留一行 id（申请人、问题、答案只在图片里），供 do 命令溯源。
+    # 环境变量 JOIN_HINT_CARD_COMPACT_TEXT；默认关闭；仅在 JOIN_HINT_CARD_ENABLED=true 时生效。
+    join_hint_card_compact_text: bool = False
 
     # 用户信息卡按北京时间自动切换主题；关闭后跟随被查询账户的 is_dark_mode。
     user_card_auto_theme: bool = True

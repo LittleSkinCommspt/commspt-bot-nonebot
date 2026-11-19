@@ -11,7 +11,7 @@
 命令（裸命令，不受全局 COMMAND_START 影响）：
 - do <accept|reject> [reason]   通过或拒绝入群申请   (in_preset_cafe; admin_only)
 - 拒绝 [理由]                   do reject 的中文快捷写法，理由可含空格
-                                (in_preset_cafe; admin_only; 需 JOIN_REPLY_REJECT_ENABLED=true，默认关闭)
+                                (in_preset_cafe; admin_only; JOIN_REPLY_REJECT_ENABLED，默认开启)
 """
 
 import re
@@ -54,12 +54,12 @@ do_action = on_regex(
 
 # 中文快捷拒绝：引用申请通知直接回复「拒绝 理由」。与 do 命令的区别：
 # - 理由取「拒绝」之后的整段文字（允许空格，含全角空格分隔）；只回复「拒绝」时用默认理由；
-# - 默认关闭（JOIN_REPLY_REJECT_ENABLED），开关只影响这个写法，do 命令始终可用。
+# - 默认开启（JOIN_REPLY_REJECT_ENABLED=false 可关闭），开关只影响这个写法，do 命令始终可用。
 REPLY_REJECT_PATTERN = r"^拒绝(?:\s+(?P<reason>\S.*?))?\s*$"
 
 
 def _reply_reject_enabled() -> bool:
-    """快捷拒绝开关（默认关闭）。"""
+    """快捷拒绝开关（默认开启）。"""
     return S_.join_reply_reject_enabled
 
 

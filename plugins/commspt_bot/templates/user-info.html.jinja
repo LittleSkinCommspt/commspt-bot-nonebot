@@ -8,364 +8,51 @@
     {% if assets_origin %}
     <link rel="preconnect" href="{{ assets_origin }}" />
     {% endif %}
-    <style>
-        /* MiSans Bold：主字体，卡片绝大部分文字走它。
-           渲染机未装字体栈里的其它字体，故用 @font-face 显式加载，两端出图一致。 */
-        @font-face {
-            font-family: "MiSans Bold";
-            src: url("{{ font_url }}") format("truetype");
-            font-weight: 100 900;
-            font-style: normal;
-            font-display: swap;
-        }
-    </style>
-    <style>
-        :root {
-            color-scheme: light;
-            --surface: #fcfdfc;
-            --ink: #1d2c27;
-            --muted: #52665c;
-            --line: #dce6df;
-            /* 卡片轮廓：卡片不带阴影且默认满幅，边界全靠这圈描边，需对卡面与各类浅色聊天底
-               (#fff / #f0f0f0 / #e8e8e8) 都保持 ≥3:1，否则浅色主题贴在浅色背景上会「隐形」 */
-            --edge: #728076;
-            --red-edge: #c0604f;
-            --soft: #f1f6f2;
-            --green: #246944;
-            --green-bg: #e8f3eb;
-            --red: #aa3329;
-            --red-bg: #fff0ed;
-            --red-line: #e7b2a9;
-            --amber: #805012;
-            --amber-bg: #fff0d9;
-        }
-        :root[data-theme="dark"] {
-            color-scheme: dark;
-            --surface: #171f1d;
-            --ink: #ecf4ef;
-            --muted: #b5c5bc;
-            --line: #394a41;
-            /* 暗色主题同理：深卡面贴深色聊天底时描边是唯一的分界依据 */
-            --edge: #74887c;
-            --red-edge: #b4685e;
-            --soft: #26362d;
-            --green: #a0d9ad;
-            --green-bg: #263e2f;
-            --red: #ffc0b6;
-            --red-bg: #432829;
-            --red-line: #87504d;
-            --amber: #f9d39b;
-            --amber-bg: #4b3821;
-        }
-        * { box-sizing: border-box; }
-        body {
-            margin: 0;
-            padding: 8px;
-            background: var(--soft);
-            color: var(--ink);
-            /* 主字体 MiSans Bold；编号类字段由 .mono 继承同一字体 */
-            font: 400 18px/1.4 "MiSans Bold", sans-serif;
-        }
-        body.no-chrome { background: transparent; padding: 0; }
-        h1, h2, p, dl, dd { margin: 0; }
-        /* 编号类字段（UID / 积分 / 邮箱 / QQ / 时间戳）与正文同用 MiSans Bold：
-           它有 tnum（tabular figures），数字位宽一致，逐位核对同样好读；
-           而并入单一字体后，每行图标都能和同一套字体度量对齐，不必再为
-           「等宽栈在 Windows 命中 Consolas、Linux 命中 Liberation Mono」
-           这类逐平台度量差异留补偿。 */
-        .mono {
-            font-family: "MiSans Bold", sans-serif;
-            font-variant-numeric: tabular-nums;
-            overflow-wrap: anywhere;
-        }
-        .timestamp { display: block; font-size: 17px; line-height: 1.3; }
-        .timestamp span { display: block; }
-        .record {
-            width: 100%;
-            max-width: 580px;
-            margin: 0 auto;
-            background: var(--surface);
-            border: 1px solid var(--edge);
-            border-radius: 24px;
-            overflow: hidden;
-        }
-        .record.is-banned { border-color: var(--red-edge); border-top: 5px solid var(--red); }
-        .identity { padding: 16px 18px 12px; }
-        .identity-line { min-width: 0; }
-        /* 昵称与状态徽章同排：徽章靠右不参与收缩，昵称换行也不会挤走它 */
-        .identity-head {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 12px;
-            font-size: 36px;
-            line-height: 1.2;
-        }
-        /* ---- 图标与同排文字的对齐口径 ----------------------------------------
-           口径只有一条：各行是 display:flex + align-items:center，图标尺寸用 em 表达
-           （.ic 1em / .fact .95em / .email-heading h2 1.275em / .ban-icon 1.05em），
-           于是图标盒中心落在文字行盒中轴上。
-           MiSans Bold 的 hhea 是 1044/−282，内容框中心在基线上方 (1044−282)/2 = 0.381em，
-           而其 CJK 字形墨迹中心同样落在 0.381em（「邮/绑/注/时/间」实测 −0.778…+0.016em），
-           所以「图标盒中心 = 行盒中轴」就是「图标中心 = 汉字视觉中心」。
-           受控实验（12 个图标各自与「注」同排、字号放大到 200px 以消除整像素量化）实测：
-           图标墨迹中心与汉字墨迹中心的差异为 +0.5px = 0.0025em，且 12 个图标读数完全一致
-           ——该差值来自取样边界奇偶，不是图形差异。结论：align-items:center 已足够，
-           不需要也不应该按图形逐个补 translateY。
-           尺寸用 em 的另一个好处：媒体查询改字号时图标同步缩放，不会有某一行漏改。
-           邮箱 / UID / 积分的图标刻意比同排字略大（1.275em / .95em），让图标压过字面，
-           比与字面等高的 1em 更有存在感。 */
-        svg.ic, svg.ban-icon {
-            vertical-align: middle;
-            display: inline-block;
-        }
-
-        /* UID 与积分同属「账号数字」，并排成一组 */
-        .identity-facts { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
-        .fact {
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            min-width: 0;
-            font-size: 22px;
-            font-weight: 600;
-            line-height: 1.2;
-            color: var(--ink);
-        }
-        .fact svg.ic {
-            height: .95em;
-            width: auto;
-            flex: none;
-            color: var(--muted);
-        }
-        .fact-divider { width: 1px; height: 1em; background: var(--line); flex: none; align-self: center; }
-        h1 { font-size: inherit; line-height: inherit; font-weight: 700; overflow-wrap: anywhere; flex: 1 1 auto; min-width: 0; }
-        .account-state { flex-shrink: 0; text-align: right; height: 1.2em; display: flex; align-items: center; }
-        .generated { margin-top: 4px; font-size: 13px; color: var(--muted); }
-        .state-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 5px 12px;
-            border-radius: 8px;
-            background: var(--green-bg);
-            color: var(--green);
-            font-size: 14px;
-            font-weight: 600;
-            line-height: 1;
-            white-space: nowrap;
-        }
-        .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-        .account-badge { padding: 3px 10px; font-size: 22px; line-height: 1.3; }
-        .is-banned .account-badge { background: var(--red-bg); color: var(--red); }
-        .ban-notice {
-            margin-top: 12px;
-            padding: 10px 12px;
-            border-left: 5px solid var(--red);
-            border-radius: 12px;
-            background: var(--red-bg);
-            color: var(--red);
-        }
-        .ban-heading {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 17px;
-            font-weight: 600;
-            line-height: 1.2;
-        }
-        .ban-icon {
-            flex: none;
-            height: 1.05em;
-            width: auto;
-        }
-        .ban-reason { margin-top: 6px; font-size: 20px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
-        .details { padding: 0 18px 16px; }
-        .email { padding: 10px 12px; border-radius: 14px; background: var(--soft); }
-        .email-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; }
-        .email-heading h2 {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 14px;
-            font-weight: 600;
-            line-height: 1.2;
-        }
-        /* 邮箱标题的信封：与「封禁原因」的 ban-icon 等绝对尺寸。
-           两者都是 1.05em，但所在行字号不同（封禁标题 17px、邮箱标题 14px），
-           绝对高因此差 3.15px（17.84 vs 14.69）。这里按 17.84/14 = 1.275em 取值，
-           使其与封禁图标等大。
-           对齐复核（dsf 8 实测）：图标墨迹高 13.38 vs 同排汉字 13.25、中心差 +0.44px，
-           与本卡其他图标行（+0.44…+0.62px）一致；`.email-heading` 总高保持 24px 不变，
-           右侧「已验证」徽章位置不受影响。 */
-        .email-heading h2 svg.ic {
-            height: 1.275em;
-        }
-        .email-value { font-size: 20px; font-weight: 500; overflow-wrap: anywhere; }
-        .email.is-unverified .badge { background: var(--amber-bg); color: var(--amber); }
-        .email-help {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            margin-top: 4px;
-            font-size: 12px;
-            line-height: 1.2;
-            color: var(--amber);
-            overflow-wrap: anywhere;
-        }
-        .qq-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-top: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
-        .qq-grid dd { font-size: 20px; line-height: 1.3; }
-        .qq-note {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            margin-top: 2px;
-            font-size: 12px;
-            line-height: 1.2;
-            color: var(--green);
-        }
-        /* 积分移至身份区后剩 3 项：属地占满整行，两个时间戳成对，避免 2+1 留下空格 */
-        .account-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-top: 12px; }
-        .account-grid > .is-wide { grid-column: 1 / -1; }
-        .qq-grid > div, .account-grid > div { min-width: 0; }
-        /* 字段标签图标：基础尺寸用 em 跟随行字号（邮箱标题、帮助行、QMAIL 提示等） */
-        .ic {
-            height: 1em;
-            width: auto;
-            flex: none;
-            color: var(--muted);
-            opacity: .85;
-        }
-        /* 底部五个字段标签（dt）：尺寸由 .ic 的 1em 决定 */
-        dt {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 13px;
-            font-weight: 600;
-            line-height: 1.2;
-            color: var(--muted);
-        }
-        /* ---- 逐图标微调（自己调位置就看这里）----------------------------------
-           每个图标一个 CSS 变量 `--nudge-<图标名>`，默认 0。想调哪个图标，就把下面对应
-           那一行的数值改掉：
-             · 负值 = 图标上移      正值 = 图标下移
-             · 值带 em，随行字号缩放：13px 行里 0.077em ≈ 1px，22px 行里 0.045em ≈ 1px。
-             · 只写数字部分，别删分号。
-
-           现有两枚非 0 的理由（别随手清掉）：
-             register / last-sign 所在的 .account-grid 格子被 <dd> 的相对时间 + 绝对时间
-             撑高，dt 行在格内的落点与 .qq-grid 不同，实测这两枚图标中心比同排汉字低
-             1.62 / 1.56px，而同网格其他行只有 0.44–0.62px。各上移 0.077em 后回到
-             0.62 / 0.56px。 */
-        svg[data-ink] {
-            transform: translateY(var(--nudge, 0));
-        }
-        svg[data-ink="uid"]       { --nudge: var(--nudge-uid, 0); }
-        svg[data-ink="score"]     { --nudge: var(--nudge-score, 0); }
-        svg[data-ink="banned"]    { --nudge: var(--nudge-banned, 0); }
-        svg[data-ink="email"]     { --nudge: var(--nudge-email, 0); }
-        svg[data-ink="warn"]      { --nudge: var(--nudge-warn, 0); }
-        svg[data-ink="qq"]        { --nudge: var(--nudge-qq, 0); }
-        svg[data-ink="signature"] { --nudge: var(--nudge-signature, 0); }
-        svg[data-ink="network"]   { --nudge: var(--nudge-network, 0); }
-        svg[data-ink="register"]  { --nudge: var(--nudge-register, -0.077em); }
-        svg[data-ink="last-sign"] { --nudge: var(--nudge-last-sign, -0.077em); }
-        svg[data-ink="check"]     { --nudge: var(--nudge-check, 0); }
-        svg[data-ink="nickname"]  { --nudge: var(--nudge-nickname, 0); }
-        dd { margin-top: 3px; font-size: 15px; line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
-        /* 相对时间为主读数，绝对时间降为次要行 */
-        .ago { display: block; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
-        .ago.quiet { font-weight: 600; color: var(--muted); }
-        .account-grid .timestamp { font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 3px; }
-        .account-grid .timestamp span { display: inline; }
-        .account-grid .timestamp span + span::before { content: " "; }
-        @media (max-width: 480px) {
-            .identity { padding: 16px 18px 12px; }
-            .details { padding: 0 18px 16px; }
-            .identity-head { font-size: 32px; }
-            .email-value { font-size: 18px; }
-            .fact { font-size: 20px; }
-        }
-        @media (max-width: 360px) {
-            .account-grid, .qq-grid { grid-template-columns: 1fr; }
-        }
-    </style>
+    {# 与「答案不是纯数字」提示卡共用同一套样式，版式说明见 card-base.css.jinja #}
+    <style>{% include "card-base.css.jinja" %}</style>
 </head>
 <body{% if transparent %} class="no-chrome"{% endif %}>
-    {# 内嵌 FontAwesome 原版矢量图标，无需外部字体或脚本依赖 #}
-    {% macro icon(name, cls='ic') -%}
-    {% if name == 'uid' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 576 512" aria-hidden="true"><path fill="currentColor" d="M0 96l576 0c0-35.3-28.7-64-64-64L64 32C28.7 32 0 60.7 0 96zm0 32L0 416c0 35.3 28.7 64 64 64l448 0c35.3 0 64-28.7 64-64l0-288L0 128zM64 405.3c0-29.5 23.9-53.3 53.3-53.3l117.3 0c29.5 0 53.3 23.9 53.3 53.3c0 5.9-4.8 10.7-10.7 10.7L74.7 416c-5.9 0-10.7-4.8-10.7-10.7zM176 192a64 64 0 1 1 0 128 64 64 0 1 1 0-128zm176 16c0-8.8 7.2-16 16-16l128 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-128 0c-8.8 0-16-7.2-16-16zm0 64c0-8.8 7.2-16 16-16l128 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-128 0c-8.8 0-16-7.2-16-16zm0 64c0-8.8 7.2-16 16-16l128 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-128 0c-8.8 0-16-7.2-16-16z"/></svg>
-    {% elif name == 'score' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M64 32C28.7 32 0 60.7 0 96L0 416c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-224c0-35.3-28.7-64-64-64L80 128c-8.8 0-16-7.2-16-16s7.2-16 16-16l368 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L64 32zM416 272a32 32 0 1 1 0 64 32 32 0 1 1 0-64z"/></svg>
-    {% elif name == 'banned' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 640 512" aria-hidden="true"><path fill="currentColor" d="M240 32a32 32 0 1 1 64 0 32 32 0 1 1 -64 0zM192 48a32 32 0 1 1 0 64 32 32 0 1 1 0-64zm-32 80c17.7 0 32 14.3 32 32l8 0c13.3 0 24 10.7 24 24l0 16c0 1.7-.2 3.4-.5 5.1C280.3 229.6 320 286.2 320 352c0 88.4-71.6 160-160 160S0 440.4 0 352c0-65.8 39.7-122.4 96.5-146.9c-.4-1.6-.5-3.3-.5-5.1l0-16c0-13.3 10.7-24 24-24l8 0c0-17.7 14.3-32 32-32zm0 320a96 96 0 1 0 0-192 96 96 0 1 0 0 192zm192-96c0-25.9-5.1-50.5-14.4-73.1c16.9-32.9 44.8-59.1 78.9-73.9c-.4-1.6-.5-3.3-.5-5.1l0-16c0-13.3 10.7-24 24-24l8 0c0-17.7 14.3-32 32-32s32 14.3 32 32l8 0c13.3 0 24 10.7 24 24l0 16c0 1.7-.2 3.4-.5 5.1C600.3 229.6 640 286.2 640 352c0 88.4-71.6 160-160 160c-62 0-115.8-35.3-142.4-86.9c9.3-22.5 14.4-47.2 14.4-73.1zm224 0a96 96 0 1 0 -192 0 96 96 0 1 0 192 0zM368 0a32 32 0 1 1 0 64 32 32 0 1 1 0-64zm80 48a32 32 0 1 1 0 64 32 32 0 1 1 0-64z"/></svg>
-    {% elif name == 'email' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48L48 64zM0 176L0 384c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-208L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z"/></svg>
-    {% elif name == 'warn' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M256 32c14.2 0 27.3 7.5 34.5 19.8l216 368c7.3 12.4 7.3 27.7 .2 40.1S486.3 480 472 480L40 480c-14.3 0-27.6-7.7-34.7-20.1s-7-27.8 .2-40.1l216-368C228.7 39.5 241.8 32 256 32zm0 128c-13.3 0-24 10.7-24 24l0 112c0 13.3 10.7 24 24 24s24-10.7 24-24l0-112c0-13.3-10.7-24-24-24zm32 224a32 32 0 1 0 -64 0 32 32 0 1 0 64 0z"/></svg>
-    {% elif name == 'qq' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 448 512" aria-hidden="true"><path fill="currentColor" d="M433.754 420.445c-11.526 1.393-44.86-52.741-44.86-52.741 0 31.345-16.136 72.247-51.051 101.786 16.842 5.192 54.843 19.167 45.803 34.421-7.316 12.343-125.51 7.881-159.632 4.037-34.122 3.844-152.316 8.306-159.632-4.037-9.045-15.25 28.918-29.214 45.783-34.415-34.92-29.539-51.059-70.445-51.059-101.792 0 0-33.334 54.134-44.859 52.741-5.37-.65-12.424-29.644 9.347-99.704 10.261-33.024 21.995-60.478 40.144-105.779C60.683 98.063 108.982.006 224 0c113.737.006 163.156 96.133 160.264 214.963 18.118 45.223 29.912 72.85 40.144 105.778 21.768 70.06 14.716 99.053 9.346 99.704z"/></svg>
-    {% elif name == 'signature' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 640 512" aria-hidden="true"><path fill="currentColor" d="M192 128c0-17.7 14.3-32 32-32s32 14.3 32 32l0 7.8c0 27.7-2.4 55.3-7.1 82.5l-84.4 25.3c-40.6 12.2-68.4 49.6-68.4 92l0 71.9c0 40 32.5 72.5 72.5 72.5c26 0 50-13.9 62.9-36.5l13.9-24.3c26.8-47 46.5-97.7 58.4-150.5l94.4-28.3-12.5 37.5c-3.3 9.8-1.6 20.5 4.4 28.8s15.7 13.3 26 13.3l128 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-83.6 0 18-53.9c3.8-11.3 .9-23.8-7.4-32.4s-20.7-11.8-32.2-8.4L316.4 198.1c2.4-20.7 3.6-41.4 3.6-62.3l0-7.8c0-53-43-96-96-96s-96 43-96 96l0 32c0 17.7 14.3 32 32 32s32-14.3 32-32l0-32zm-9.2 177l49-14.7c-10.4 33.8-24.5 66.4-42.1 97.2l-13.9 24.3c-1.5 2.6-4.3 4.3-7.4 4.3c-4.7 0-8.5-3.8-8.5-8.5l0-71.9c0-14.1 9.3-26.6 22.8-30.7zM24 368c-13.3 0-24 10.7-24 24s10.7 24 24 24l40.3 0c-.2-2.8-.3-5.6-.3-8.5L64 368l-40 0zm592 48c13.3 0 24-10.7 24-24s-10.7-24-24-24l-310.1 0c-6.7 16.3-14.2 32.3-22.3 48L616 416z"/></svg>
-    {% elif name == 'network' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 384 512" aria-hidden="true"><path fill="currentColor" d="M215.7 499.2C267 435 384 279.4 384 192C384 86 298 0 192 0S0 86 0 192c0 87.4 117 243 168.3 307.2c12.3 15.3 35.1 15.3 47.4 0zM192 128a64 64 0 1 1 0 128 64 64 0 1 1 0-128z"/></svg>
-    {% elif name == 'register' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 576 512" aria-hidden="true"><path fill="currentColor" d="M320 32c0-9.9-4.5-19.2-12.3-25.2S289.8-1.4 280.2 1l-179.9 45C79 51.3 64 70.5 64 92.5L64 448l-32 0c-17.7 0-32 14.3-32 32s14.3 32 32 32l64 0 192 0 32 0 0-32 0-448zM256 256c0 17.7-10.7 32-24 32s-24-14.3-24-32s10.7-32 24-32s24 14.3 24 32zm96-128l96 0 0 352c0 17.7 14.3 32 32 32l64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-32 0 0-320c0-35.3-28.7-64-64-64l-96 0 0 64z"/></svg>
-    {% elif name == 'last-sign' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M217.9 105.9L340.7 228.7c7.2 7.2 11.3 17.1 11.3 27.3s-4.1 20.1-11.3 27.3L217.9 406.1c-6.4 6.4-15 9.9-24 9.9c-18.7 0-33.9-15.2-33.9-33.9l0-62.1L32 320c-17.7 0-32-14.3-32-32l0-64c0-17.7 14.3-32 32-32l128 0 0-62.1c0-18.7 15.2-33.9 33.9-33.9c9 0 17.6 3.6 24 9.9zM352 416l64 0c17.7 0 32-14.3 32-32l0-256c0-17.7-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32s14.3-32 32-32l64 0c53 0 96 43 96 96l0 256c0 53-43 96-96 96l-64 0c-17.7 0-32-14.3-32-32s14.3-32 32-32z"/></svg>
-    {% elif name == 'check' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 448 512" aria-hidden="true"><path fill="currentColor" d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/></svg>
-    {% elif name == 'nickname' %}
-    <svg class="{{ cls }}" data-ink="{{ name }}" viewBox="0 0 448 512" aria-hidden="true"><path fill="currentColor" d="M224 256A128 128 0 1 0 224 0a128 128 0 1 0 0 256zm-45.7 48C79.8 304 0 383.8 0 482.3C0 498.7 13.3 512 29.7 512l388.6 0c16.4 0 29.7-13.3 29.7-29.7C448 383.8 368.2 304 269.7 304l-91.4 0z"/></svg>
-    {% endif %}
-    {%- endmacro %}
-    {% macro timestamp(value) -%}
-    {% set parts = value.split(' ', 1) %}
-    <time class="timestamp mono" datetime="{{ value | replace(' ', 'T') }}"><span>{{ parts[0] }}</span>{% if parts | length > 1 %}<span class="clock">{{ parts[1] }}</span>{% endif %}</time>
-    {%- endmacro %}
     {% set banned = permission == -1 %}
-    <article class="record{% if banned %} is-banned{% endif %}" aria-label="LittleSkin 用户档案">
-        <section class="identity">
-            <div class="identity-line">
-                <div class="identity-head">
-                    <h1>{{ nickname }}</h1>
-                    <div class="account-state"><span class="state-label">账户状态</span><span class="badge account-badge">{{ '已封禁' if banned else '正常' }}</span></div>
-                </div>
-                <div class="identity-facts">
-                    <span class="fact mono">{{ icon('uid') }}UID {{ uid }}</span>
-                    <span class="fact-divider" aria-hidden="true"></span>
-                    <span class="fact mono">{{ icon('score') }}{{ '{:,}'.format(score) }}</span>
-                </div>
-            </div>
-            <p class="generated">生成于 {{ generated_at }}</p>
+    {% macro when(ago, at) -%}
+    {{ ago }}<span class="sub">{{ at }}</span>
+    {%- endmacro %}
+    <article class="card {{ 'is-bad' if banned else 'is-ok' }}" aria-label="LittleSkin 用户档案">
+        <header class="band">
+            <p class="meta">
+                <span class="chip {{ 'bad' if banned else 'ok' }}">{{ '已封禁' if banned else '正常' }}</span>
+                <span>UID <b>{{ uid }}</b></span>
+                <span>积分 <b>{{ '{:,}'.format(score) }}</b></span>
+            </p>
+            <h1 class="title">{{ nickname }}</h1>
+        </header>
+        <dl class="rows">
             {% if banned %}
-            <section class="ban-notice" aria-label="账户封禁提醒">
-                <h2 class="ban-heading">{{ icon('banned', 'ban-icon') }}封禁原因</h2>
-                <p class="ban-reason">{{ (ban_reason or '') | trim or '未提供封禁原因' }}</p>
-            </section>
+            <div class="row is-bad"><dt>封禁原因</dt><dd class="pre">{{ (ban_reason or '') | trim or '未提供封禁原因' }}</dd></div>
             {% endif %}
-        </section>
-        <div class="details">
-            <section class="email{% if not verified %} is-unverified{% endif %}" aria-label="邮箱信息">
-                <div class="email-heading"><h2>{{ icon('email') }}邮箱</h2><span class="badge">{{ '已验证' if verified else '未验证' }}</span></div>
-                <p class="email-value mono">{{ email }}</p>
-                {% if email | lower != email %}<p class="email-help">{{ icon('warn') }}{{ email_help }}</p>{% endif %}
-            </section>
+            <div class="row">
+                <dt>邮箱</dt>
+                <dd>{{ email }}<span class="tag {{ 'ok' if verified else 'wait' }}">{{ '已验证' if verified else '未验证' }}</span>
+                    {%- if email | lower != email %}<span class="note warn">邮箱含有大写字母</span>{% endif %}</dd>
+            </div>
             {% if qq %}
-            <dl class="qq-grid">
-                <div><dt>{{ icon('qq') }}绑定 QQ</dt><dd class="mono">{{ qq }}</dd>{% if qq ~ '@qq.com' == email %}<p class="qq-note">{{ icon('check') }}与账号邮箱一致</p>{% endif %}</div>
-                <div><dt>{{ icon('signature') }}QQ 昵称</dt><dd>{{ qq_nickname or '未获取' }}</dd></div>
-            </dl>
+            <div class="row">
+                <dt>绑定 QQ</dt>
+                <dd>{{ qq }}<span class="sub">{{ qq_nickname or '昵称未获取' }}</span>
+                    {%- if qq ~ '@qq.com' == email %}<span class="tag ok">与邮箱一致</span>{% endif %}</dd>
+            </div>
             {% endif %}
-            <dl class="account-grid">
-                <div class="is-wide"><dt>{{ icon('network') }}注册 IP 属地</dt><dd>{{ network or '未获取' }}</dd></div>
-                <div><dt>{{ icon('register') }}注册时间</dt><dd><span class="ago">{{ register_ago }}</span>{{ timestamp(register_at) }}</dd></div>
-                <div><dt>{{ icon('last-sign') }}最后签到</dt><dd>{% if register_at > last_sign_at %}<span class="ago quiet">从未签到过</span>{% else %}<span class="ago">{{ last_sign_ago }}</span>{{ timestamp(last_sign_at) }}{% endif %}</dd></div>
-            </dl>
-        </div>
+            <div class="row"><dt>注册属地</dt><dd{% if not network %} class="quiet"{% endif %}>{{ network or '未获取' }}</dd></div>
+            <div class="row"><dt>注册</dt><dd>{{ when(register_ago, register_at) }}</dd></div>
+            <div class="row">
+                <dt>最后签到</dt>
+                {% if register_at > last_sign_at %}
+                <dd class="quiet">从未签到过</dd>
+                {% else %}
+                <dd>{{ when(last_sign_ago, last_sign_at) }}</dd>
+                {% endif %}
+            </div>
+        </dl>
+        <p class="foot">生成于 {{ generated_at }}</p>
     </article>
 </body>
 </html>

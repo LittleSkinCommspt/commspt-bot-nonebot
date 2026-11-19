@@ -1,0 +1,178 @@
+{#- 用户信息卡与「答案不是纯数字」提示卡共用的样式。两张卡内容不同，但同一套视觉：
+
+    ┌ 状态色顶条 ───────────────────────────────┐
+    │ 状态标签  关键事实 …              来源 …  │  ← 元信息行（小字）
+    │ 主标题：昵称 / 申请人的原话                │  ← 唯一的大字
+    ├───────────────────────────────────────────┤
+    │ 标签  值  次要信息                         │  ← 紧凑的「标签 | 值」行，
+    │ 标签  值                                   │     细线分隔，一行一项
+    ├───────────────────────────────────────────┤
+    │ 生成于 …                                   │
+    └───────────────────────────────────────────┘
+
+    取舍：信息密度优先。标签放在值的左侧（而不是上方）、不用字段图标、不放操作提示，
+    一屏内能看到的有效信息尽量多；状态只靠顶条颜色 + 状态标签表达，缩略图里也能一眼分辨。
+    状态三种：is-ok（正常，中性底）、is-bad（已封禁，红）、is-wait（转人工，琥珀）。
+
+    渲染机只提供 MiSans Bold 一个字体文件，层级全靠字号与颜色拉开。 -#}
+@font-face {
+    font-family: "MiSans Bold";
+    src: url("{{ font_url }}") format("truetype");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+:root {
+    color-scheme: light;
+    --page: #eef1f4;
+    --surface: #ffffff;
+    --ink: #16202a;
+    --muted: #5a6573;
+    --line: #e3e7ec;
+    /* 卡片轮廓：不带阴影，边界全靠描边，需对各类浅色聊天底 (#fff / #f0f0f0 / #e8e8e8) 保持 ≥3:1 */
+    --edge: #6f7a87;
+    --band: #f3f5f8;
+    --ok: #1d6a43;
+    --ok-bg: #e0f0e6;
+    --bad: #ad3128;
+    --bad-bg: #fae3df;
+    --bad-band: #fdf1ef;
+    --wait: #8a5100;
+    --wait-bg: #fae7c4;
+    --wait-band: #fff8ea;
+}
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0e1318;
+    --surface: #141a21;
+    --ink: #e6ecf2;
+    --muted: #a1adba;
+    --line: #29323d;
+    /* 暗色主题同理：深卡面贴深色聊天底时描边是唯一的分界依据 */
+    --edge: #6d7a89;
+    --band: #1b232c;
+    --ok: #8fd3a8;
+    --ok-bg: #1f3a2b;
+    --bad: #ffab9f;
+    --bad-bg: #4a2522;
+    --bad-band: #2a1b1c;
+    --wait: #f3c77c;
+    --wait-bg: #4a3816;
+    --wait-band: #282114;
+}
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    padding: 8px;
+    background: var(--page);
+    color: var(--ink);
+    font: 400 16px/1.4 "MiSans Bold", sans-serif;
+    /* 等宽数字：UID / QQ / 时间戳逐位对齐，核对更快 */
+    font-variant-numeric: tabular-nums;
+}
+body.no-chrome { background: transparent; padding: 0; }
+h1, p, dl, dd { margin: 0; }
+
+.card {
+    width: 100%;
+    max-width: 580px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--edge);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+/* ---- 顶部：状态色顶条 + 元信息行 + 主标题 ---------------------------------- */
+.band {
+    padding: 9px 14px 11px;
+    background: var(--band);
+    border-top: 4px solid var(--edge);
+}
+.is-ok .band { border-top-color: var(--ok); }
+.is-bad .band { background: var(--bad-band); border-top-color: var(--bad); }
+.is-wait .band { background: var(--wait-band); border-top-color: var(--wait); }
+
+.meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 4px;
+    font-size: 14px;
+    line-height: 1.3;
+    color: var(--muted);
+}
+.meta b { color: var(--ink); font-weight: inherit; }
+/* 元信息行右侧的来源信息；换行时仍贴右 */
+.meta .end { margin-left: auto; display: flex; gap: 10px; }
+.chip {
+    padding: 2px 8px;
+    border-radius: 5px;
+    font-size: 13px;
+    line-height: 1.35;
+    white-space: nowrap;
+}
+.chip.ok { background: var(--ok-bg); color: var(--ok); }
+.chip.bad { background: var(--bad-bg); color: var(--bad); }
+.chip.wait { background: var(--wait-bg); color: var(--wait); }
+
+.title {
+    margin-top: 5px;
+    font-size: 28px;
+    line-height: 1.25;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+.title.is-empty { color: var(--muted); }
+
+/* ---- 主体：紧凑的「标签 | 值」行 ------------------------------------------ */
+.rows { padding: 0 14px; }
+.row {
+    display: grid;
+    grid-template-columns: 4.2em minmax(0, 1fr);
+    column-gap: 8px;
+    align-items: baseline;
+    padding: 7px 0;
+    border-top: 1px solid var(--line);
+}
+.row:first-child { border-top: 0; }
+.row dt { font-size: 13px; line-height: 1.3; color: var(--muted); }
+.row dd { font-size: 16px; line-height: 1.38; overflow-wrap: anywhere; }
+.row.is-bad dt, .row.is-bad dd { color: var(--bad); }
+.row dd.quiet { color: var(--muted); }
+/* 值后面的次要信息（昵称、绝对时间等），同一行跟在主值后面 */
+.sub { margin-left: 8px; font-size: 13px; color: var(--muted); }
+/* 值下方单独一行的补充说明 */
+.note { display: block; margin-top: 2px; font-size: 12.5px; line-height: 1.3; color: var(--muted); }
+.note.warn { color: var(--wait); }
+/* 值后面的小标签（已验证 / 与邮箱一致 等） */
+.tag {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.5;
+    vertical-align: 1px;
+    white-space: nowrap;
+}
+.tag.ok { background: var(--ok-bg); color: var(--ok); }
+.tag.wait { background: var(--wait-bg); color: var(--wait); }
+.pre { white-space: pre-wrap; }
+/* 长文本（个性签名等）最多两行，避免把卡片拉得很长 */
+.clamp {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+}
+
+.foot {
+    padding: 6px 14px 8px;
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--muted);
+}

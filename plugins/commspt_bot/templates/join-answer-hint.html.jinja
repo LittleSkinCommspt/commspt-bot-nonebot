@@ -3,230 +3,52 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>入群申请：答案不是纯数字</title>
+    <title>入群申请转人工：答案不是纯数字</title>
     {# 资源基址由渲染后端注入，见 browserless.py 的 _resolve_assets() #}
     {% if assets_origin %}
     <link rel="preconnect" href="{{ assets_origin }}" />
     {% endif %}
-    <style>
-        /* 渲染机只提供 MiSans Bold 一个字体文件；层级全靠字号与颜色拉开 */
-        @font-face {
-            font-family: "MiSans Bold";
-            src: url("{{ font_url }}") format("truetype");
-            font-weight: 100 900;
-            font-style: normal;
-            font-display: swap;
-        }
-    </style>
-    <style>
-        /* ---- 设计口径 ------------------------------------------------------------
-           这不是用户档案（user-info 卡），是一张「回执单」：
-           · 主角是申请人的原话，用一对大号直角引号「」框住；引号用印章红，
-             意思是「这句答案有问题」；
-           · 底部三格操作栏，拒绝整格填红——答案不是 UID 的申请默认拒绝，
-             但拒绝也要管理员手动操作，所以把它做成最显眼、最先看到的那一格；
-           · 来源与申请人压成顶部一行小字，不另起信息网格；
-           · 直角 + 墨线外框，像打印出来的单据，与用户卡的大圆角细边档案区分开。 */
-        :root {
-            color-scheme: light;
-            --sheet: #fbfcfe;
-            --ink: #1b2a41;
-            --muted: #5a6880;
-            --rule: #c9d2de;
-            --seal: #b8322a;
-            --seal-ink: #ffffff;
-            --seal-soft: #f7e3e0;
-            --cell: #eef2f7;
-            /* 单据墨线：浅色主题直接用字色 */
-            --frame: #1b2a41;
-        }
-        :root[data-theme="dark"] {
-            color-scheme: dark;
-            --sheet: #161d27;
-            --ink: #e6ecf4;
-            --muted: #a7b3c4;
-            --rule: #3a4658;
-            --seal: #e0675b;
-            --seal-ink: #1a0f0d;
-            --seal-soft: #3f2420;
-            --cell: #1f2835;
-            /* 深色主题下墨线若用字色（近白）会在深色聊天底上发刺，改用柔和的灰蓝 */
-            --frame: #8796aa;
-        }
-        * { box-sizing: border-box; }
-        body {
-            margin: 0;
-            padding: 8px;
-            background: var(--cell);
-            color: var(--ink);
-            font: 400 16px/1.45 "MiSans Bold", sans-serif;
-            font-variant-numeric: tabular-nums;
-        }
-        body.no-chrome { background: transparent; padding: 0; }
-        p, ul { margin: 0; }
-
-        .sheet {
-            width: 100%;
-            max-width: 580px;
-            margin: 0 auto;
-            padding: 14px 16px 12px;
-            background: var(--sheet);
-            border: 2px solid var(--frame);
-            border-radius: 4px;
-        }
-
-        /* 顶部一行：左边是来源，右边是申请人 */
-        .meta {
-            display: flex;
-            align-items: baseline;
-            justify-content: space-between;
-            gap: 12px;
-            font-size: 14px;
-            line-height: 1.3;
-            color: var(--muted);
-        }
-        .source { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
-        .source b { color: var(--ink); font-weight: inherit; }
-        .source span + span { padding-left: 10px; border-left: 1px solid var(--rule); }
-        .who { min-width: 0; text-align: right; overflow-wrap: anywhere; }
-        .who b { color: var(--ink); font-weight: inherit; }
-
-        /* ---- 主角：被「」框住的原话 ---------------------------------------------
-           引号用两个 L 形边框画出来，不依赖字体里的「」字形，长短粗细可控。 */
-        .quote {
-            position: relative;
-            margin: 16px 0 0;
-            padding: 16px 30px 18px;
-        }
-        .quote::before, .quote::after {
-            content: "";
-            position: absolute;
-            width: 26px;
-            height: 34px;
-            border: 0 solid var(--seal);
-        }
-        .quote::before { top: 0; left: 0; border-top-width: 5px; border-left-width: 5px; }
-        .quote::after { right: 0; bottom: 0; border-bottom-width: 5px; border-right-width: 5px; }
-        .answer {
-            font-size: 30px;
-            line-height: 1.38;
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-            word-break: break-word;
-        }
-        .answer.is-empty { color: var(--muted); }
-
-        .verdict {
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            margin-top: 8px;
-            padding-left: 30px;
-            font-size: 15px;
-            line-height: 1.3;
-            color: var(--seal);
-        }
-        .verdict svg { height: 1em; width: auto; flex: none; }
-
-        /* ---- 操作栏：三格并排，拒绝在前且整格填色 ------------------------------ */
-        .actions {
-            display: grid;
-            grid-template-columns: 1.1fr 1fr 0.9fr;
-            margin-top: 16px;
-            padding: 0;
-            list-style: none;
-            border: 2px solid var(--frame);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-        .actions li {
-            min-width: 0;
-            padding: 10px 11px 11px;
-            background: var(--cell);
-        }
-        .actions li + li { border-left: 2px solid var(--frame); }
-        .actions li.is-primary { background: var(--seal); color: var(--seal-ink); }
-        .verb {
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            font-size: 19px;
-            line-height: 1.2;
-        }
-        .verb svg { height: .95em; width: auto; flex: none; }
-        .how {
-            margin-top: 6px;
-            font-size: 13px;
-            line-height: 1.45;
-            overflow-wrap: anywhere;
-        }
-        .how + .how { margin-top: 2px; }
-        .actions li:not(.is-primary) .how { color: var(--muted); }
-        .how svg { height: 1.05em; width: auto; vertical-align: -0.17em; }
-        .cmd {
-            padding: 0 5px;
-            border-radius: 3px;
-            background: var(--sheet);
-            color: var(--ink);
-            font-family: inherit;
-            white-space: nowrap;
-        }
-        .is-primary .cmd { background: var(--seal-soft); color: var(--ink); }
-
-        .stamp-time {
-            margin-top: 8px;
-            font-size: 12px;
-            line-height: 1.2;
-            color: var(--muted);
-            text-align: right;
-        }
-    </style>
+    {# 与用户信息卡共用同一套样式，版式说明见 card-base.css.jinja #}
+    <style>{% include "card-base.css.jinja" %}</style>
 </head>
 <body{% if transparent %} class="no-chrome"{% endif %}>
-    {# 内嵌 FontAwesome 矢量图标（不依赖渲染机的 emoji 字体） #}
-    {% set thumb = 'M313.4 32.9c26 5.2 42.9 30.5 37.7 56.5l-2.3 11.4c-5.3 26.7-15.1 52.1-28.8 75.2H464c26.5 0 48 21.5 48 48c0 18.5-10.5 34.6-25.9 42.6C497 275.4 504 288.9 504 304c0 23.4-16.8 42.9-38.9 47.1c4.4 7.3 6.9 15.8 6.9 24.9c0 21.3-13.9 39.4-33.1 45.6c.7 3.3 1.1 6.8 1.1 10.4c0 26.5-21.5 48-48 48H294.5c-19 0-37.5-5.6-53.3-16.1l-38.5-25.7C176 420.4 160 390.4 160 358.3V320 272 247.1c0-29.2 13.3-56.7 36-75l7.4-5.9c26.5-21.2 44.6-51 51.2-84.2l2.3-11.4c5.2-26 30.5-42.9 56.5-37.7zM32 192H96c17.7 0 32 14.3 32 32V448c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32V224c0-17.7 14.3-32 32-32z' %}
-    {% set reply = 'M205 34.8c11.5 5.1 19 16.6 19 29.2v64H336c97.2 0 176 78.8 176 176c0 113.3-81.5 163.9-100.2 174.1c-2.5 1.4-5.3 1.9-8.1 1.9c-10.9 0-19.7-8.9-19.7-19.7c0-7.5 4.3-14.4 9.8-19.5c9.4-8.8 22.2-26.4 22.2-56.7c0-53-43-96-96-96H224v64c0 12.6-7.4 24.1-19 29.2s-25 3-34.4-5.4l-160-144C3.9 225.7 0 217.1 0 208s3.9-17.7 10.6-23.8l160-144c9.4-8.5 22.9-10.6 34.4-5.4z' %}
-    {% macro thumb_icon(down=false) -%}
-    <svg viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor"{% if down %} transform="matrix(1 0 0 -1 0 512)"{% endif %} d="{{ thumb }}"/></svg>
-    {%- endmacro %}
-    <article class="sheet" aria-label="入群申请：答案不是纯数字">
-        <header class="meta">
-            <p class="source"><span><b>{{ '主群' if kind == 'Main' else '茶馆' }}</b></span><span>{{ '邀请入群' if sub_type == 'invite' else '主动申请' }}</span></p>
-            <p class="who">{% if qq_nickname %}<b>{{ qq_nickname }}</b> {% endif %}{{ applicant }}</p>
-        </header>
-
-        <blockquote class="quote" style="margin-left:0;margin-right:0">
+    {#- Bot 只在条件满足时自动同意；答案不是纯数字就转人工。卡片只摆事实（申请人的原话、
+        QQ 资料），不推断、不给处理建议，由管理员判断（例如对方可能无法注册）。 -#}
+    {% set sex_label = {'male': '男', 'female': '女'} %}
+    {% set profile = [] %}
+    {% if qq_level %}{% set _ = profile.append('Lv.' ~ qq_level) %}{% endif %}
+    {% if qq_sex in sex_label %}{% set _ = profile.append(sex_label[qq_sex]) %}{% endif %}
+    {% if qq_age %}{% set _ = profile.append(qq_age ~ ' 岁') %}{% endif %}
+    <article class="card is-wait" aria-label="入群申请转人工">
+        <header class="band">
+            <p class="meta">
+                <span class="chip wait">转人工</span>
+                <span>答案不是纯数字</span>
+                <span class="end"><b>{{ '主群' if kind == 'Main' else '茶馆' }}</b><span>{{ '邀请入群' if sub_type == 'invite' else '主动申请' }}</span></span>
+            </p>
             {% if answer | trim %}
-            <p class="answer">{{ answer | trim }}</p>
+            <h1 class="title">{{ answer | trim }}</h1>
             {% else %}
-            <p class="answer is-empty">（空）</p>
+            <h1 class="title is-empty">（未填写答案）</h1>
             {% endif %}
-        </blockquote>
-        <p class="verdict"><svg viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M256 32c14.2 0 27.3 7.5 34.5 19.8l216 368c7.3 12.4 7.3 27.7 .2 40.1S486.3 480 472 480L40 480c-14.3 0-27.6-7.7-34.7-20.1s-7-27.8 .2-40.1l216-368C228.7 39.5 241.8 32 256 32zm0 128c-13.3 0-24 10.7-24 24l0 112c0 13.3 10.7 24 24 24s24-10.7 24-24l0-112c0-13.3-10.7-24-24-24zm32 224a32 32 0 1 0 -64 0 32 32 0 1 0 64 0z"/></svg>答案不是纯数字，需手动处理</p>
-
-        <ul class="actions" aria-label="处理方式">
-            <li class="is-primary">
-                <p class="verb">{{ thumb_icon(down=true) }}拒绝</p>
-                <p class="how">贴 {{ thumb_icon(down=true) }} 表情</p>
-                <p class="how">理由「{{ reject_reason }}」</p>
-            </li>
-            <li>
-                <p class="verb"><svg viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="{{ reply }}"/></svg>自定义理由</p>
-                {% if reply_reject_enabled %}
-                <p class="how">引用回复 <code class="cmd">拒绝 理由</code></p>
-                {% else %}
-                <p class="how">引用回复 <code class="cmd">do reject 理由</code></p>
-                <p class="how">理由中不能有空格</p>
-                {% endif %}
-            </li>
-            <li>
-                <p class="verb">{{ thumb_icon() }}通过</p>
-                <p class="how">贴 {{ thumb_icon() }} 表情</p>
-                <p class="how">或回复 <code class="cmd">do accept</code></p>
-            </li>
-        </ul>
-
-        <p class="stamp-time">{{ generated_at }}</p>
+        </header>
+        <dl class="rows">
+            <div class="row">
+                <dt>申请人</dt>
+                <dd>{{ applicant }}<span class="sub">{{ qq_nickname or '昵称未获取' }}</span>
+                    {%- if invited_id is not none %}<span class="note">也可能是 {{ invited_id }}</span>{% endif %}</dd>
+            </div>
+            {% if profile %}
+            <div class="row"><dt>QQ 资料</dt><dd>{{ profile | join('　') }}</dd></div>
+            {% endif %}
+            {% if qq_registered_ago %}
+            <div class="row"><dt>QQ 注册</dt><dd>{{ qq_registered_ago }}<span class="sub">{{ qq_registered_on }}</span></dd></div>
+            {% endif %}
+            {% if qq_sign %}
+            <div class="row"><dt>个性签名</dt><dd class="clamp">{{ qq_sign }}</dd></div>
+            {% endif %}
+        </dl>
+        <p class="foot">生成于 {{ generated_at }}</p>
     </article>
 </body>
 </html>

@@ -61,7 +61,7 @@ from plugins.commspt_bot.utils.join_request_notice import (
 )
 from plugins.commspt_bot.utils.messenger import send_to_group as _send_to_group
 from plugins.commspt_bot.utils.messenger import send_to_group_with_id as _send_to_group_with_id
-from plugins.commspt_bot.utils.qq_profile import get_qq_nickname
+from plugins.commspt_bot.utils.qq_profile import get_qq_nickname, get_qq_profile
 
 _SETUID = display_command("setuid")
 """补写映射用的管理端命令展示文本（前缀跟随 COMMAND_START）。"""
@@ -194,19 +194,22 @@ async def _render_non_numeric_card(
     applicant: int,
     answer: str,
     sub_type: NoticeSubtype,
+    invited_id: int | None = None,
 ) -> bytes | None:
     """best-effort 渲染「答案不是纯数字」提示卡；失败返回 None（不影响审批）。
 
-    卡片只把申请事件本身的信息（申请人 QQ、昵称、答案原文）摆清楚，不做识别或猜测。
-    渲染失败时通知仍是完整的文字版（答案原文本就在通知块里），只记日志，不额外提示。
+    卡片只摆事实：申请人的原话与 QQ 公开资料（复用查昵称的那一次 get_stranger_info），
+    不做识别或猜测。消息里的文字部分只用于 Bot 溯源申请 flag；渲染失败时通知照常以
+    文字发出（答案原文本就在通知块里），只记日志，不额外提示。
     """
     try:
-        card = RenderJoinAnswerHint(
+        card = RenderJoinAnswerHint.from_profile(
+            await get_qq_profile(bot, applicant),
             kind=kind,
             sub_type=sub_type,
             applicant=applicant,
-            qq_nickname=await get_qq_nickname(bot, applicant),
             answer=answer,
+            invited_id=invited_id,
         )
         return await card.get_image()
     except Exception as e:
@@ -347,7 +350,7 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             req.sub_type,
             req.flag,
             [_NON_NUMERIC_HINT],
-            await _render_non_numeric_card(bot, "Main", applicant, answer, req.sub_type),
+            await _render_non_numeric_card(bot, "Main", applicant, answer, req.sub_type, invited_id),
             invited_id=invited_id,
         )
         return
@@ -582,7 +585,7 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
             req.sub_type,
             req.flag,
             [_NON_NUMERIC_HINT],
-            await _render_non_numeric_card(bot, "Cafe", applicant, answer, req.sub_type),
+            await _render_non_numeric_card(bot, "Cafe", applicant, answer, req.sub_type, invited_id),
             invited_id=invited_id,
         )
         return

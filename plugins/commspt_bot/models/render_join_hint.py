@@ -1,7 +1,8 @@
 """入群申请「答案不是纯数字」提示卡的渲染数据模型与图片生成。
 
 与用户信息卡（``render_user_info``）共用同一套样式（``templates/card-base.css.jinja``），
-内容不同：那张是 LittleSkin 账号档案，这张以申请人的原话为标题，下面是申请人的 QQ 公开资料。
+内容不同：那张是 LittleSkin 账号档案，这张以申请人的原话为标题，下面是入群问题与申请人的
+QQ 公开资料。默认不出图（JOIN_HINT_CARD_ENABLED 开启后才发送）。
 
 Bot 只在条件满足时有自动同意权；答案不是纯数字就转人工（对方可能无法注册等）。卡片只摆事实：
 内容全部来自申请事件本身与 ``get_stranger_info``，不查主站、不查映射库，不从答案里识别或
@@ -36,6 +37,8 @@ class RenderJoinAnswerHint(BaseModel):
     sub_type: NoticeSubtype
     applicant: int
     answer: str = ""
+    # 申请留言里的入群问题（没有则为空串）；精简文字模式下问题只在卡片上
+    question: str = ""
     # 协议端事件里可能附带的另一个 QQ（与文字通知「也可能是」一致，仅作展示）
     invited_id: int | None = None
     qq_nickname: str = ""
@@ -56,6 +59,7 @@ class RenderJoinAnswerHint(BaseModel):
         applicant: int,
         answer: str,
         invited_id: int | None = None,
+        question: str = "",
     ) -> "RenderJoinAnswerHint":
         """由申请事件信息与 QQ 公开资料构建渲染上下文。"""
         return cls(
@@ -63,6 +67,7 @@ class RenderJoinAnswerHint(BaseModel):
             sub_type=sub_type,
             applicant=applicant,
             answer=answer,
+            question=question,
             invited_id=invited_id,
             qq_nickname=profile.nickname,
             qq_level=profile.level,

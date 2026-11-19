@@ -58,6 +58,7 @@ from plugins.commspt_bot.utils.join_request_notice import (
     NoticeKind,
     NoticeSubtype,
     format_join_request_notice,
+    format_join_request_ref,
 )
 from plugins.commspt_bot.utils.messenger import send_to_group as _send_to_group
 from plugins.commspt_bot.utils.messenger import send_to_group_with_id as _send_to_group_with_id
@@ -95,6 +96,22 @@ def _invited_id_of(req: GroupRequestEvent) -> int | None:
 
 _ANSWER_PREFIXES = ("答案：", "答案:")
 """申请留言的答案前缀（全角/半角冒号都兼容）。"""
+
+_QUESTION_PREFIXES = ("问题：", "问题:")
+"""申请留言的入群问题前缀（全角/半角冒号都兼容）。"""
+
+
+def _extract_question(comment: str | None) -> str:
+    """从申请留言中提取入群问题（取第一个以「问题：」开头的行，没有则返回空串）。
+
+    入群问题只作展示（通知文字与提示卡），不参与任何判定。
+    """
+    for line in (comment or "").splitlines():
+        text = line.strip()
+        for prefix in _QUESTION_PREFIXES:
+            if text.startswith(prefix):
+                return text[len(prefix) :].strip()
+    return ""
 
 
 def _extract_answer(comment: str | None) -> str:
@@ -195,13 +212,19 @@ async def _render_non_numeric_card(
     answer: str,
     sub_type: NoticeSubtype,
     invited_id: int | None = None,
+    question: str = "",
 ) -> bytes | None:
-    """best-effort 渲染「答案不是纯数字」提示卡；失败返回 None（不影响审批）。
+    """best-effort 渲染「答案不是纯数字」提示卡；未开启或失败时返回 None（不影响审批）。
+
+    默认关闭（JOIN_HINT_CARD_ENABLED）：关闭时直接返回 None，不查 QQ 资料、不出图，
+    通知就是原来的纯文字。
 
     卡片只摆事实：申请人的原话与 QQ 公开资料（复用查昵称的那一次 get_stranger_info），
-    不做识别或猜测。消息里的文字部分只用于 Bot 溯源申请 flag；渲染失败时通知照常以
-    文字发出（答案原文本就在通知块里），只记日志，不额外提示。
+    不做识别或猜测。出图成功时消息文字只剩一行精简引用，供 Bot 溯源申请 flag；
+    渲染失败时通知回落为完整文字版（答案原文本就在通知块里），只记日志，不额外提示。
     """
+    if not S_.join_hint_card_enabled:
+        return None
     try:
         card = RenderJoinAnswerHint.from_profile(
             await get_qq_profile(bot, applicant),
@@ -210,6 +233,7 @@ async def _render_non_numeric_card(
             applicant=applicant,
             answer=answer,
             invited_id=invited_id,
+            question=question,
         )
         return await card.get_image()
     except Exception as e:
@@ -228,12 +252,20 @@ async def _send_approval_notice(
     message: list[str],
     image: bytes | None = None,
     invited_id: int | None = None,
+    *,
+    compact: bool = False,
+    question: str = "",
 ) -> None:
     """向群聊发送入群审批通知并贴上 👍/👎 表情，登记表情审批凭证。
 
     仅用于「需要管理员人工处理」的通知；自动通过 / 纯结果通知请直接用 _send_to_group。
     协议端不支持 set_msg_emoji_like 时静默降级，不影响 do 命令审批。
-    ``invited_id`` 仅作为申请人行的候选提示（见 format_join_request_notice）。
+    ``invited_id`` 仅作为申请人行的候选提示，``question`` 是入群问题（均见 format_join_request_notice）。
+
+    ``compact=True`` 且附了图片时，文字部分只发一行精简引用（format_join_request_ref），
+    ``message`` 里的提示行一并省略——给人看的信息都在图片里，文字只供 do 命令溯源。
+    没有图片（渲染失败）时自动回落为完整通知块 + 提示行。精简引用不携带答案，
+    因此只能用于答案不是有效 UID 的通知。
     """
     notice = JoinRequestNotice(
         kind=kind,
@@ -242,8 +274,14 @@ async def _send_approval_notice(
         sub_type=sub_type,
         flag=flag,
     )
-    # 保持与旧实现一致：通知块在前，附加提示行在后
-    parts = [format_join_request_notice(kind, applicant, answer, sub_type, flag, invited_id), *message]
+    if compact and image:
+        parts = [format_join_request_ref(kind, applicant, sub_type, flag)]
+    else:
+        # 保持与旧实现一致：通知块在前，附加提示行在后
+        parts = [
+            format_join_request_notice(kind, applicant, answer, sub_type, flag, invited_id, question=question),
+            *message,
+        ]
     noti = UniMessage()
     if image:
         noti = noti.image(raw=image)
@@ -338,6 +376,7 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
     logger.info(f"Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
 
     if not answer.isdecimal():  # UID 应为十进制纯数字
+        question = _extract_question(req.comment)
         logger.warning(
             f"(main) Member Join Request Event {req.sub_type} was ignored. (ANSWER NOT DECIMAL) {applicant} > {answer}",
         )
@@ -350,8 +389,10 @@ async def member_join_request(bot: Bot, event: GroupRequestEvent):
             req.sub_type,
             req.flag,
             [_NON_NUMERIC_HINT],
-            await _render_non_numeric_card(bot, "Main", applicant, answer, req.sub_type, invited_id),
+            await _render_non_numeric_card(bot, "Main", applicant, answer, req.sub_type, invited_id, question),
             invited_id=invited_id,
+            compact=S_.join_hint_card_compact_text,
+            question=question,
         )
         return
 
@@ -570,6 +611,7 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
     logger.info(f"(cafe) Member Join Request Event {req.sub_type} flag={req.flag} was received. {applicant} > {answer}")
 
     if not answer.isdecimal():  # UID 应为十进制纯数字
+        question = _extract_question(req.comment)
         logger.warning(
             f"(cafe) Member Join Request Event {req.sub_type} was ignored. (ANSWER NOT DECIMAL) {applicant} > {answer}",
         )
@@ -585,8 +627,10 @@ async def cafe_join_request_handler(bot: Bot, event: GroupRequestEvent):
             req.sub_type,
             req.flag,
             [_NON_NUMERIC_HINT],
-            await _render_non_numeric_card(bot, "Cafe", applicant, answer, req.sub_type, invited_id),
+            await _render_non_numeric_card(bot, "Cafe", applicant, answer, req.sub_type, invited_id, question),
             invited_id=invited_id,
+            compact=S_.join_hint_card_compact_text,
+            question=question,
         )
         return
 

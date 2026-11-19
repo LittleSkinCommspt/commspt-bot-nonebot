@@ -33,6 +33,9 @@
             {% endif %}
         </header>
         <dl class="rows">
+            {% if question | trim %}
+            <div class="row"><dt>入群问题</dt><dd>{{ question | trim }}</dd></div>
+            {% endif %}
             <div class="row">
                 <dt>申请人</dt>
                 <dd>{{ applicant }}<span class="sub">{{ qq_nickname or '昵称未获取' }}</span>
